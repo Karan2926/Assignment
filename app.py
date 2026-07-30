@@ -595,20 +595,18 @@ def recognize_face():
         clf = load_model_if_exists()
         if clf is None:
             return jsonify({"recognized": False, "error": "model not trained"}), 200
-        pred_label, conf = predict_with_model(clf, emb)
+
+        # Phase 2: match only against students enrolled in this class
+        enrolled = db.student_ids_in_class(class_id)
+        pred_label, conf = predict_with_model(
+            clf,
+            emb,
+            allowed_ids=enrolled if enrolled else None,
+        )
         if pred_label is None:
             return jsonify({"recognized": False, "confidence": float(conf)}), 200
 
         sid = int(pred_label)
-        enrolled = db.student_ids_in_class(class_id)
-        if enrolled and sid not in enrolled:
-            return jsonify(
-                {
-                    "recognized": False,
-                    "error": "Face matched a student not enrolled in this class",
-                    "confidence": float(conf),
-                }
-            ), 200
 
         with db.get_conn() as conn:
             row = conn.execute("SELECT name FROM students WHERE id=?", (sid,)).fetchone()
@@ -815,7 +813,12 @@ def recognize_classroom():
     img_file = request.files["image"]
 
     try:
-        from model import extract_embeddings_for_classroom, load_model_if_exists, predict_with_model
+        from model import (
+            CLASSROOM_SIM_THRESHOLD,
+            extract_embeddings_for_classroom,
+            load_model_if_exists,
+            predict_with_model,
+        )
 
         faces = extract_embeddings_for_classroom(img_file.stream)
         if not faces:
@@ -828,12 +831,19 @@ def recognize_classroom():
         enrolled = db.student_ids_in_class(class_id)
         today = datetime.date.today().isoformat()
         results_list = []
+        # Keep best match per student when one person appears multiple times
+        best_by_student = {}
 
         with db.get_conn() as conn:
             c = conn.cursor()
             for face in faces:
                 emb = face["embedding"]
-                pred_label, conf = predict_with_model(clf, emb)
+                pred_label, conf = predict_with_model(
+                    clf,
+                    emb,
+                    allowed_ids=enrolled if enrolled else None,
+                    similarity_threshold=CLASSROOM_SIM_THRESHOLD,
+                )
 
                 entry = {
                     "bbox": face["bbox"],
@@ -846,10 +856,6 @@ def recognize_classroom():
 
                 if pred_label is not None:
                     sid = int(pred_label)
-                    if enrolled and sid not in enrolled:
-                        results_list.append(entry)
-                        continue
-
                     c.execute(
                         "SELECT name, roll, class FROM students WHERE id=?", (sid,)
                     )
@@ -871,9 +877,28 @@ def recognize_classroom():
                         if c.fetchone():
                             entry["already_marked"] = True
 
+                        prev = best_by_student.get(sid)
+                        if prev is None or entry["confidence"] > prev["confidence"]:
+                            best_by_student[sid] = entry
+                        continue
+
                 results_list.append(entry)
 
-        return jsonify({"faces": results_list, "class_id": class_id, "subject_id": subject_id}), 200
+        # Recognized students once each + unknowns
+        results_list = list(best_by_student.values()) + [
+            e for e in results_list if not e.get("recognized")
+        ]
+
+        return jsonify(
+            {
+                "faces": results_list,
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "detected": len(faces),
+                "matched": len(best_by_student),
+                "phase": 2,
+            }
+        ), 200
 
     except Exception as e:
         app.logger.exception("classroom recognize error")

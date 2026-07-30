@@ -1,17 +1,17 @@
 # Phased roadmap
 
-## Phase 1 — Foundation (done in this branch)
+## Phase 1 — Foundation ✅
 - Classes, subjects, enrollments
 - Teacher assignments (class + subject)
 - Admin panel
 - Attendance scoped by class/subject/day
 - Teacher-only visibility of records/analytics/CSV
 
-## Phase 2 — Recognition at 80+ scale
+## Phase 2 — Recognition at 80+ scale ✅ (this branch)
 - Match only against the selected class roster (not whole college)
-- Improve classroom detection (higher det size / multi-shot)
-- Align distance + confidence scoring
-- Incremental embedding index (avoid full retrain when possible)
+- Higher-res classroom detection (960 det size + upscale + NMS)
+- Unified cosine similarity scoring + margin check
+- Per-student centroids + incremental embedding cache
 
 ## Phase 3 — College portal integration
 - Export format matching portal maintainer spec

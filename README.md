@@ -1,17 +1,22 @@
-# Digital Attendance — Phase 1
+# Digital Attendance — Phase 2
 
-Smart face-recognition attendance for college, built on your existing Flask + InsightFace prototype.
+Smart face-recognition attendance for college, built on your Flask + InsightFace prototype.
 
-## What Phase 1 adds
+## What Phase 1 added
 
 - **Classes & subjects** — structured college data instead of free-text only
 - **Teacher access control** — each teacher only sees assigned class+subject pairs
 - **Scoped attendance** — mark / classroom / records / analytics / CSV filtered by access
 - **Admin panel** — create classes, subjects, teachers, and assignments
-- **Enrollment** — students belong to a class; recognition rejects out-of-class matches
+- **Enrollment** — students belong to a class
 - **Per day uniqueness** — one present mark per student **per class + subject + day**
 
-Face recognition (`model.py`) is unchanged for Phase 1. Phase 2 will improve large-class matching.
+## What Phase 2 adds
+
+- **Class-scoped matching** — compare faces only to students enrolled in the selected class
+- **Better classroom detection** — larger detector window, upscale, overlap NMS
+- **Cleaner confidence** — cosine similarity + margin (no conflicting KNN probability)
+- **Faster retrain** — `embedding_cache.pkl` skips unchanged face photos
 
 ## Quick start
 
@@ -51,8 +56,8 @@ Students register at `/register` using a roll number the teacher already added.
 
 | Phase | Focus |
 |-------|--------|
-| **1 (this)** | Data model, teacher access, scoped attendance |
-| **2** | Face recognition for 80+ students (class-scoped gallery, better classroom detection) |
+| **1** | Data model, teacher access, scoped attendance ✅ |
+| **2 (this)** | Face recognition for 80+ students ✅ |
 | **3** | College portal sync (API / CSV) |
 | **4** | Hardening, ops, production secrets |
 
