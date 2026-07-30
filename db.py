@@ -3,214 +3,299 @@
 from __future__ import annotations
 
 import datetime
-import os
-import sqlite3
-from contextlib import contextmanager
 from typing import Any, Iterable, Optional
 
 import config
+from db_engine import (
+    USE_POSTGRES,
+    IntegrityError,
+    Row,
+    ensure_columns,
+    get_conn,
+    table_columns,
+)
 
 APP_DIR = config.APP_DIR
 DB_PATH = config.DB_PATH
 
+# Re-export for app/scripts
+__all__ = [
+    "USE_POSTGRES",
+    "IntegrityError",
+    "get_conn",
+    "init_db",
+    "class_label",
+    "get_user_assignments",
+    "teacher_can_access",
+    "teacher_class_ids",
+    "list_classes_for_user",
+    "list_subjects_for_class",
+    "student_ids_in_class",
+    "mark_present",
+    "teacher_can_manage_student",
+    "delete_student_cascade",
+    "upsert_face_centroid",
+    "load_face_centroids",
+    "face_embedding_count",
+]
 
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, timeout=30)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    try:
-        yield conn
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+
+def _init_sqlite(conn) -> None:
+    c = conn.cursor()
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            roll TEXT,
+            class TEXT,
+            section TEXT,
+            reg_no TEXT,
+            class_id INTEGER,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attendance (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER,
+            name TEXT,
+            timestamp TEXT,
+            class_id INTEGER,
+            subject_id INTEGER,
+            marked_by INTEGER,
+            source TEXT,
+            attendance_day TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            student_id INTEGER,
+            full_name TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS classes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            section TEXT NOT NULL DEFAULT '',
+            academic_year TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subjects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            class_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            code TEXT,
+            created_at TEXT,
+            FOREIGN KEY(class_id) REFERENCES classes(id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teacher_assignments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            class_id INTEGER NOT NULL,
+            subject_id INTEGER NOT NULL,
+            created_at TEXT,
+            UNIQUE(user_id, class_id, subject_id),
+            FOREIGN KEY(user_id) REFERENCES users(id),
+            FOREIGN KEY(class_id) REFERENCES classes(id),
+            FOREIGN KEY(subject_id) REFERENCES subjects(id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS enrollments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            class_id INTEGER NOT NULL,
+            created_at TEXT,
+            UNIQUE(student_id, class_id),
+            FOREIGN KEY(student_id) REFERENCES students(id),
+            FOREIGN KEY(class_id) REFERENCES classes(id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS face_embeddings (
+            student_id INTEGER PRIMARY KEY,
+            centroid BLOB NOT NULL,
+            dim INTEGER NOT NULL,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT,
+            FOREIGN KEY(student_id) REFERENCES students(id)
+        )
+        """
+    )
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
-    return {r[1] for r in rows}
+def _init_postgres(conn) -> None:
+    c = conn.cursor()
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS students (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            roll TEXT,
+            class TEXT,
+            section TEXT,
+            reg_no TEXT,
+            class_id INTEGER,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attendance (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER,
+            name TEXT,
+            timestamp TEXT,
+            class_id INTEGER,
+            subject_id INTEGER,
+            marked_by INTEGER,
+            source TEXT,
+            attendance_day TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            role TEXT NOT NULL,
+            student_id INTEGER,
+            full_name TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS classes (
+            id SERIAL PRIMARY KEY,
+            name TEXT NOT NULL,
+            section TEXT NOT NULL DEFAULT '',
+            academic_year TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS subjects (
+            id SERIAL PRIMARY KEY,
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            name TEXT NOT NULL,
+            code TEXT,
+            created_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS teacher_assignments (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            subject_id INTEGER NOT NULL REFERENCES subjects(id),
+            created_at TEXT,
+            UNIQUE(user_id, class_id, subject_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS enrollments (
+            id SERIAL PRIMARY KEY,
+            student_id INTEGER NOT NULL REFERENCES students(id),
+            class_id INTEGER NOT NULL REFERENCES classes(id),
+            created_at TEXT,
+            UNIQUE(student_id, class_id)
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS face_embeddings (
+            student_id INTEGER PRIMARY KEY REFERENCES students(id),
+            centroid BYTEA NOT NULL,
+            dim INTEGER NOT NULL,
+            sample_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT
+        )
+        """
+    )
 
 
-def _ensure_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]) -> None:
-    existing = _table_columns(conn, table)
-    for name, decl in columns.items():
-        if name not in existing:
-            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+def _create_indexes(conn) -> None:
+    c = conn.cursor()
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_attendance_lookup ON attendance(student_id, class_id, subject_id, timestamp)"
+    )
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_attendance_class_day ON attendance(class_id, subject_id, timestamp)"
+    )
+    c.execute("CREATE INDEX IF NOT EXISTS idx_students_roll ON students(roll)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id)")
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_enrollments_class ON enrollments(class_id, student_id)"
+    )
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_assignments_user ON teacher_assignments(user_id)"
+    )
+    c.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_day
+        ON attendance(student_id, class_id, subject_id, attendance_day)
+        WHERE student_id IS NOT NULL
+          AND class_id IS NOT NULL
+          AND subject_id IS NOT NULL
+          AND attendance_day IS NOT NULL
+        """
+    )
+    c.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_students_roll
+        ON students(roll)
+        WHERE roll IS NOT NULL AND TRIM(roll) != ''
+        """
+    )
 
 
 def init_db() -> None:
     with get_conn() as conn:
-        c = conn.cursor()
+        if USE_POSTGRES:
+            _init_postgres(conn)
+        else:
+            _init_sqlite(conn)
 
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                roll TEXT,
-                class TEXT,
-                section TEXT,
-                reg_no TEXT,
-                class_id INTEGER,
-                created_at TEXT
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS attendance (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER,
-                name TEXT,
-                timestamp TEXT,
-                class_id INTEGER,
-                subject_id INTEGER,
-                marked_by INTEGER,
-                source TEXT
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                role TEXT NOT NULL,
-                student_id INTEGER,
-                full_name TEXT,
-                created_at TEXT
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS classes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                section TEXT NOT NULL DEFAULT '',
-                academic_year TEXT,
-                created_at TEXT
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS subjects (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                class_id INTEGER NOT NULL,
-                name TEXT NOT NULL,
-                code TEXT,
-                created_at TEXT,
-                FOREIGN KEY(class_id) REFERENCES classes(id)
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS teacher_assignments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                class_id INTEGER NOT NULL,
-                subject_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(user_id, class_id, subject_id),
-                FOREIGN KEY(user_id) REFERENCES users(id),
-                FOREIGN KEY(class_id) REFERENCES classes(id),
-                FOREIGN KEY(subject_id) REFERENCES subjects(id)
-            )
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS enrollments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                class_id INTEGER NOT NULL,
-                created_at TEXT,
-                UNIQUE(student_id, class_id),
-                FOREIGN KEY(student_id) REFERENCES students(id),
-                FOREIGN KEY(class_id) REFERENCES classes(id)
-            )
-            """
-        )
-        # Production: store face centroids in DB (~2KB/student), not 48 JPEGs forever.
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS face_embeddings (
-                student_id INTEGER PRIMARY KEY,
-                centroid BLOB NOT NULL,
-                dim INTEGER NOT NULL,
-                sample_count INTEGER NOT NULL DEFAULT 0,
-                updated_at TEXT,
-                FOREIGN KEY(student_id) REFERENCES students(id)
-            )
-            """
-        )
-
-        # Indexes for ~7000 students / heavy attendance reads
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_attendance_lookup ON attendance(student_id, class_id, subject_id, timestamp)"
-        )
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_attendance_class_day ON attendance(class_id, subject_id, timestamp)"
-        )
-        c.execute("CREATE INDEX IF NOT EXISTS idx_students_roll ON students(roll)")
-        c.execute("CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id)")
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_enrollments_class ON enrollments(class_id, student_id)"
-        )
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_assignments_user ON teacher_assignments(user_id)"
-        )
-
-        _ensure_columns(
-            conn,
-            "attendance",
-            {"attendance_day": "TEXT"},
-        )
-
-        # Backfill attendance_day from timestamp for older rows
-        c.execute(
-            """
-            UPDATE attendance
-            SET attendance_day = date(timestamp)
-            WHERE attendance_day IS NULL AND timestamp IS NOT NULL
-            """
-        )
-
-        # Enforce one present mark per student/class/subject/day (critical under concurrency)
-        c.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_day
-            ON attendance(student_id, class_id, subject_id, attendance_day)
-            WHERE student_id IS NOT NULL
-              AND class_id IS NOT NULL
-              AND subject_id IS NOT NULL
-              AND attendance_day IS NOT NULL
-            """
-        )
-
-        # Prefer unique rolls when present (ignore blank)
-        c.execute(
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS uq_students_roll
-            ON students(roll)
-            WHERE roll IS NOT NULL AND TRIM(roll) != ''
-            """
-        )
-
-        _ensure_columns(
-            conn,
-            "students",
-            {"class_id": "INTEGER"},
-        )
-        _ensure_columns(
+        ensure_columns(conn, "attendance", {"attendance_day": "TEXT"})
+        ensure_columns(conn, "students", {"class_id": "INTEGER"})
+        ensure_columns(
             conn,
             "attendance",
             {
@@ -220,14 +305,21 @@ def init_db() -> None:
                 "source": "TEXT",
             },
         )
-        _ensure_columns(
-            conn,
-            "users",
-            {"full_name": "TEXT"},
+        ensure_columns(conn, "users", {"full_name": "TEXT"})
+
+        # Backfill attendance_day (ISO text timestamps — substr works on SQLite + Postgres)
+        conn.execute(
+            """
+            UPDATE attendance
+            SET attendance_day = substr(timestamp, 1, 10)
+            WHERE attendance_day IS NULL AND timestamp IS NOT NULL
+            """
         )
 
+        _create_indexes(conn)
+
         # Migrate free-text class/section into classes + enrollments where possible.
-        students = c.execute(
+        students = conn.execute(
             "SELECT id, class, section, class_id FROM students WHERE class IS NOT NULL AND TRIM(class) != ''"
         ).fetchall()
         for s in students:
@@ -235,7 +327,7 @@ def init_db() -> None:
                 continue
             class_name = (s["class"] or "").strip()
             section = (s["section"] or "").strip()
-            existing = c.execute(
+            existing = conn.execute(
                 "SELECT id FROM classes WHERE name=? AND section=?",
                 (class_name, section),
             ).fetchone()
@@ -243,27 +335,31 @@ def init_db() -> None:
                 class_id = existing["id"]
             else:
                 now = datetime.datetime.utcnow().isoformat()
-                cur = c.execute(
+                cur = conn.execute(
                     "INSERT INTO classes (name, section, academic_year, created_at) VALUES (?, ?, ?, ?)",
                     (class_name, section, None, now),
                 )
                 class_id = cur.lastrowid
-            c.execute("UPDATE students SET class_id=? WHERE id=?", (class_id, s["id"]))
-            c.execute(
+            conn.execute("UPDATE students SET class_id=? WHERE id=?", (class_id, s["id"]))
+            conn.execute(
                 "INSERT OR IGNORE INTO enrollments (student_id, class_id, created_at) VALUES (?, ?, ?)",
                 (s["id"], class_id, datetime.datetime.utcnow().isoformat()),
             )
 
 
 def class_label(row: Any) -> str:
-    name = row["name"] if isinstance(row, sqlite3.Row) else row[1]
-    section = row["section"] if isinstance(row, sqlite3.Row) else row[2]
+    try:
+        name = row["name"]
+        section = row["section"]
+    except Exception:
+        name = row[1]
+        section = row[2]
     if section:
         return f"{name} — Sec {section}"
     return name
 
 
-def get_user_assignments(user_id: int, role: str) -> list[sqlite3.Row]:
+def get_user_assignments(user_id: int, role: str) -> list:
     with get_conn() as conn:
         if role == "admin":
             return conn.execute(
@@ -324,7 +420,7 @@ def teacher_class_ids(user_id: int, role: str) -> Optional[set[int]]:
     return {r["class_id"] for r in rows}
 
 
-def list_classes_for_user(user_id: int, role: str) -> list[sqlite3.Row]:
+def list_classes_for_user(user_id: int, role: str) -> list:
     with get_conn() as conn:
         if role == "admin":
             return conn.execute(
@@ -342,7 +438,7 @@ def list_classes_for_user(user_id: int, role: str) -> list[sqlite3.Row]:
         ).fetchall()
 
 
-def list_subjects_for_class(user_id: int, role: str, class_id: int) -> list[sqlite3.Row]:
+def list_subjects_for_class(user_id: int, role: str, class_id: int) -> list:
     with get_conn() as conn:
         if role == "admin":
             return conn.execute(
@@ -385,12 +481,11 @@ def mark_present(
     ts = datetime.datetime.utcnow().isoformat()
     saved = 0
     with get_conn() as conn:
-        c = conn.cursor()
         for sid in student_ids:
-            row = c.execute("SELECT name FROM students WHERE id=?", (sid,)).fetchone()
+            row = conn.execute("SELECT name FROM students WHERE id=?", (sid,)).fetchone()
             name = row["name"] if row else "Unknown"
             try:
-                c.execute(
+                cur = conn.execute(
                     """
                     INSERT INTO attendance
                       (student_id, name, timestamp, class_id, subject_id, marked_by, source, attendance_day)
@@ -398,9 +493,9 @@ def mark_present(
                     """,
                     (sid, name, ts, class_id, subject_id, marked_by, source, today),
                 )
-                if c.rowcount:
+                if cur.rowcount:
                     saved += 1
-            except sqlite3.IntegrityError:
+            except IntegrityError:
                 # Already marked today for this class+subject
                 continue
     return saved
@@ -413,7 +508,6 @@ def teacher_can_manage_student(user_id: int, role: str, student_id: int) -> bool
     class_ids = teacher_class_ids(user_id, role)
     if not class_ids:
         return False
-    enrolled = set()
     with get_conn() as conn:
         rows = conn.execute(
             """
@@ -478,7 +572,10 @@ def load_face_centroids(allowed_ids: Optional[Iterable[int]] = None) -> dict[int
 
     out = {}
     for r in rows:
-        vec = np.frombuffer(r["centroid"], dtype=np.float32)
+        blob = r["centroid"]
+        if isinstance(blob, memoryview):
+            blob = blob.tobytes()
+        vec = np.frombuffer(blob, dtype=np.float32)
         if r["dim"] and len(vec) == r["dim"]:
             out[int(r["student_id"])] = vec.copy()
     return out
@@ -488,3 +585,7 @@ def face_embedding_count() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM face_embeddings").fetchone()
     return int(row["n"] if row else 0)
+
+
+def backend_name() -> str:
+    return "postgresql" if USE_POSTGRES else "sqlite"

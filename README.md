@@ -73,4 +73,12 @@ static/css|js       Theme + camera scripts
 dataset/            Face images (gitignored)
 ```
 
-Set `SECRET_KEY` in the environment before any real deployment.
+## Database
+
+- **Local:** SQLite file (`attendance.db`) — default
+- **College production:** PostgreSQL via `DATABASE_URL` — see [`POSTGRES.md`](POSTGRES.md)
+
+```bash
+python3 -c "import db; print(db.backend_name())"   # sqlite | postgresql
+```
+

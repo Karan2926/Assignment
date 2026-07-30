@@ -44,7 +44,12 @@ chmod +x scripts/backup.sh
 ./scripts/backup.sh /path/to/backup-dir
 ```
 
-## Still next (P0 remaining)
-- Move InsightFace to a worker process (don’t run heavy AI in every gunicorn worker forever)
-- Postgres for multi-building concurrency
-- College portal SSO / sync
+## Database
+- **Local:** SQLite (`DB_PATH`) — leave `DATABASE_URL` unset
+- **College:** PostgreSQL — set `DATABASE_URL` (see `POSTGRES.md`)
+- Migrate existing data: `python3 scripts/migrate_sqlite_to_postgres.py`
+
+## Still next (after Postgres)
+- Move InsightFace to a worker process
+- nginx TLS + CSRF + audit log
+- College portal API **last** (React connects afterward)

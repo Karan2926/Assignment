@@ -52,10 +52,11 @@ export SECRET_KEY='long-random-string'
 
 ## Next for true production (7000 concurrent-capable)
 
-1. **Postgres** instead of SQLite (`DATABASE_URL=...`) — still TODO wiring  
-2. Deploy behind **gunicorn/nginx** (not `python app.py` debug)  
-3. Backups of `attendance.db` + `dataset/*/profile.jpg` nightly  
-4. Phase 3: push attendance into college portal (don’t duplicate SIS forever)
+1. **Postgres** — set `DATABASE_URL` (see `POSTGRES.md`) ✅ wiring started  
+2. InsightFace worker (off web workers)  
+3. nginx TLS termination  
+4. Backups of DB + `dataset/*/profile.jpg` nightly  
+5. College portal API **last**
 
 ## Rule
 
