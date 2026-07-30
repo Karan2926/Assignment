@@ -50,3 +50,11 @@ PERMANENT_SESSION_LIFETIME_HOURS = int(os.environ.get("SESSION_LIFETIME_HOURS", 
 RATELIMIT_DEFAULT = os.environ.get("RATELIMIT_DEFAULT", "200 per hour")
 RATELIMIT_LOGIN = os.environ.get("RATELIMIT_LOGIN", "10 per minute")
 RATELIMIT_RECOGNIZE = os.environ.get("RATELIMIT_RECOGNIZE", "30 per minute")
+
+# College portal API (React portal → this attendance service)
+# Set a long random key; portal sends it as: Authorization: Bearer <key>
+# or header X-Portal-Api-Key: <key>
+PORTAL_API_KEY = os.environ.get("PORTAL_API_KEY", "").strip()
+# Optional: attendance service can POST daily packs to the college portal
+PORTAL_PUSH_URL = os.environ.get("PORTAL_PUSH_URL", "").strip()
+PORTAL_PUSH_TOKEN = os.environ.get("PORTAL_PUSH_TOKEN", "").strip()

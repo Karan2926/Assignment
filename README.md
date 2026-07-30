@@ -57,9 +57,21 @@ Students register at `/register` using a roll number the teacher already added.
 | Phase | Focus |
 |-------|--------|
 | **1** | Data model, teacher access, scoped attendance ✅ |
-| **2 (this)** | Face recognition for 80+ students ✅ |
-| **3** | College portal sync (API / CSV) |
-| **4** | Hardening, ops, production secrets |
+| **2** | Face recognition for 80+ students ✅ |
+| **2.5 / 2.6** | Storage + production hardening ✅ |
+| **3** | College React portal API (`PORTAL_API.md`) |
+| **4** | Postgres, face worker, CSRF/SSO |
+
+## College portal (React)
+
+Smart Attendance stays separate. Connect the college React site later:
+
+```bash
+export PORTAL_API_KEY='long-random-key'
+# Portal calls: GET /api/portal/v1/attendance?date=YYYY-MM-DD
+```
+
+Details: [`PORTAL_API.md`](PORTAL_API.md)
 
 ## Project layout
 

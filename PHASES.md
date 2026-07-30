@@ -29,12 +29,14 @@
 - Rate limits, session cookie flags, upload size cap
 - Backup script
 
-## Phase 3 — College portal integration
-- Export format matching portal maintainer spec
-- Optional API push of daily attendance
-- Student ID mapping (roll ↔ portal ID)
+## Phase 3 — College portal integration (API started)
+- `/api/portal/v1/*` JSON API for React college portal — see `PORTAL_API.md`
+- Shared `PORTAL_API_KEY` auth (Bearer / X-Portal-Api-Key)
+- Student master sync from portal + `portal_student_id` mapping
+- Attendance pull/export pack + optional push to `PORTAL_PUSH_URL`
+- Sync log table `portal_sync_log`
 
 ## Phase 4 — Remaining production
 - InsightFace worker process (off web workers)
 - Postgres for multi-building concurrency
-- CSRF tokens, SSO, audit log
+- CSRF tokens, SSO, richer audit log

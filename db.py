@@ -225,6 +225,31 @@ def init_db() -> None:
             "users",
             {"full_name": "TEXT"},
         )
+        # College portal identity (React SIS) ↔ local student row
+        _ensure_columns(
+            conn,
+            "students",
+            {"portal_student_id": "TEXT"},
+        )
+        c.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_students_portal_id
+            ON students(portal_student_id)
+            WHERE portal_student_id IS NOT NULL AND TRIM(portal_student_id) != ''
+            """
+        )
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS portal_sync_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                direction TEXT NOT NULL,
+                resource TEXT NOT NULL,
+                status TEXT NOT NULL,
+                detail TEXT,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
 
         # Migrate free-text class/section into classes + enrollments where possible.
         students = c.execute(
@@ -488,3 +513,247 @@ def face_embedding_count() -> int:
     with get_conn() as conn:
         row = conn.execute("SELECT COUNT(*) AS n FROM face_embeddings").fetchone()
     return int(row["n"] if row else 0)
+
+
+def log_portal_sync(direction: str, resource: str, status: str, detail: str = "") -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO portal_sync_log (direction, resource, status, detail, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                direction,
+                resource,
+                status,
+                detail[:2000] if detail else "",
+                datetime.datetime.utcnow().isoformat(),
+            ),
+        )
+
+
+def set_student_portal_id(student_id: int, portal_student_id: str) -> bool:
+    portal_student_id = (portal_student_id or "").strip()
+    if not portal_student_id:
+        return False
+    with get_conn() as conn:
+        row = conn.execute("SELECT id FROM students WHERE id=?", (student_id,)).fetchone()
+        if not row:
+            return False
+        try:
+            conn.execute(
+                "UPDATE students SET portal_student_id=? WHERE id=?",
+                (portal_student_id, student_id),
+            )
+        except sqlite3.IntegrityError:
+            raise
+    return True
+
+
+def upsert_portal_student(
+    *,
+    portal_student_id: str,
+    name: str,
+    roll: str = "",
+    class_id: Optional[int] = None,
+) -> dict[str, Any]:
+    """
+    Create or update a local student from college portal master data.
+    Match order: portal_student_id → roll (non-empty) → insert new.
+    """
+    portal_student_id = (portal_student_id or "").strip()
+    name = (name or "").strip()
+    roll = (roll or "").strip()
+    if not portal_student_id or not name:
+        raise ValueError("portal_student_id and name are required")
+
+    now = datetime.datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        c = conn.cursor()
+        row = c.execute(
+            "SELECT id FROM students WHERE portal_student_id=?",
+            (portal_student_id,),
+        ).fetchone()
+        if not row and roll:
+            row = c.execute(
+                "SELECT id FROM students WHERE roll=? AND TRIM(roll) != ''",
+                (roll,),
+            ).fetchone()
+
+        if row:
+            sid = int(row["id"])
+            c.execute(
+                """
+                UPDATE students
+                SET name=?, roll=COALESCE(NULLIF(?, ''), roll),
+                    portal_student_id=?,
+                    class_id=COALESCE(?, class_id)
+                WHERE id=?
+                """,
+                (name, roll, portal_student_id, class_id, sid),
+            )
+            created = False
+        else:
+            cur = c.execute(
+                """
+                INSERT INTO students (name, roll, class, section, reg_no, class_id, created_at, portal_student_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (name, roll or None, None, None, None, class_id, now, portal_student_id),
+            )
+            sid = int(cur.lastrowid)
+            created = True
+
+        if class_id:
+            c.execute(
+                "INSERT OR IGNORE INTO enrollments (student_id, class_id, created_at) VALUES (?, ?, ?)",
+                (sid, class_id, now),
+            )
+
+    return {"student_id": sid, "created": created, "portal_student_id": portal_student_id}
+
+
+def list_portal_students(class_id: Optional[int] = None) -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        if class_id:
+            rows = conn.execute(
+                """
+                SELECT s.id, s.name, s.roll, s.class_id, s.portal_student_id, s.created_at
+                FROM students s
+                WHERE s.class_id = ?
+                   OR s.id IN (SELECT student_id FROM enrollments WHERE class_id=?)
+                ORDER BY s.name
+                """,
+                (class_id, class_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT id, name, roll, class_id, portal_student_id, created_at
+                FROM students
+                ORDER BY name
+                """
+            ).fetchall()
+    return [
+        {
+            "student_id": int(r["id"]),
+            "name": r["name"],
+            "roll": r["roll"] or "",
+            "class_id": r["class_id"],
+            "portal_student_id": r["portal_student_id"] or "",
+            "mapped": bool(r["portal_student_id"]),
+            "created_at": r["created_at"],
+        }
+        for r in rows
+    ]
+
+
+def export_attendance(
+    *,
+    day: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    class_id: Optional[int] = None,
+    subject_id: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Attendance pack for college portal (present marks only)."""
+    clauses = ["1=1"]
+    params: list[Any] = []
+
+    if day:
+        clauses.append("COALESCE(a.attendance_day, date(a.timestamp)) = ?")
+        params.append(day)
+    if date_from:
+        clauses.append("COALESCE(a.attendance_day, date(a.timestamp)) >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("COALESCE(a.attendance_day, date(a.timestamp)) <= ?")
+        params.append(date_to)
+    if class_id:
+        clauses.append("a.class_id = ?")
+        params.append(class_id)
+    if subject_id:
+        clauses.append("a.subject_id = ?")
+        params.append(subject_id)
+
+    where = " AND ".join(clauses)
+    with get_conn() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT a.id AS attendance_id,
+                   a.student_id,
+                   a.name AS student_name,
+                   a.timestamp,
+                   a.attendance_day,
+                   a.class_id,
+                   a.subject_id,
+                   a.source,
+                   s.roll,
+                   s.portal_student_id,
+                   c.name AS class_name,
+                   c.section AS class_section,
+                   sub.name AS subject_name,
+                   sub.code AS subject_code
+            FROM attendance a
+            LEFT JOIN students s ON s.id = a.student_id
+            LEFT JOIN classes c ON c.id = a.class_id
+            LEFT JOIN subjects sub ON sub.id = a.subject_id
+            WHERE {where}
+            ORDER BY COALESCE(a.attendance_day, date(a.timestamp)), a.class_id, a.subject_id, s.roll
+            """,
+            params,
+        ).fetchall()
+
+    out = []
+    for r in rows:
+        day_val = r["attendance_day"] or (r["timestamp"][:10] if r["timestamp"] else None)
+        out.append(
+            {
+                "attendance_id": int(r["attendance_id"]),
+                "student_id": r["student_id"],
+                "portal_student_id": r["portal_student_id"] or "",
+                "roll": r["roll"] or "",
+                "student_name": r["student_name"],
+                "status": "present",
+                "date": day_val,
+                "marked_at": r["timestamp"],
+                "class_id": r["class_id"],
+                "class_name": r["class_name"] or "",
+                "class_section": r["class_section"] or "",
+                "subject_id": r["subject_id"],
+                "subject_name": r["subject_name"] or "",
+                "subject_code": r["subject_code"] or "",
+                "source": r["source"] or "",
+            }
+        )
+    return out
+
+
+def list_portal_classes() -> list[dict[str, Any]]:
+    with get_conn() as conn:
+        classes = conn.execute(
+            "SELECT id, name, section, academic_year FROM classes ORDER BY name, section"
+        ).fetchall()
+        subjects = conn.execute(
+            "SELECT id, class_id, name, code FROM subjects ORDER BY class_id, name"
+        ).fetchall()
+    by_class: dict[int, list] = {}
+    for s in subjects:
+        by_class.setdefault(int(s["class_id"]), []).append(
+            {
+                "subject_id": int(s["id"]),
+                "name": s["name"],
+                "code": s["code"] or "",
+            }
+        )
+    return [
+        {
+            "class_id": int(c["id"]),
+            "name": c["name"],
+            "section": c["section"] or "",
+            "academic_year": c["academic_year"] or "",
+            "label": class_label(c),
+            "subjects": by_class.get(int(c["id"]), []),
+        }
+        for c in classes
+    ]

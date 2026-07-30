@@ -22,6 +22,7 @@ from datetime import timedelta
 
 import config
 import db
+from portal_api import portal_bp
 
 try:
     from flask_limiter import Limiter
@@ -45,6 +46,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = config.SESSION_COOKIE_SAMESITE
 app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
 
 db.init_db()
+app.register_blueprint(portal_bp)
 
 limiter = None
 if Limiter and get_remote_address:
