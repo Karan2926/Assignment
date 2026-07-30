@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>My Attendance — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/my_attendance">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 900px;">
+    <div class="dash-hero" style="grid-template-columns: 1.4fr 0.6fr;">
+      <div class="dash-hero-main">
+        <span class="eyebrow">My records</span>
+        <h1>{{ student['name'] if student else "Student" }}</h1>
+        <p class="mono" style="color:rgba(255,255,255,0.8);">
+          Roll: {{ student['roll'] if student else "-" }}
+          · {{ student['class'] if student else "-" }}
+          {{ student['section'] if student else "" }}
+        </p>
+      </div>
+      <div class="dash-stat">
+        <span class="eyebrow">Present</span>
+        <div class="num">{{ records|length }}</div>
+        <div class="mono" style="color:var(--ink-soft); margin-top:0.35rem; font-size:0.75rem;">record(s)</div>
+      </div>
+    </div>
+
+    <div class="card2">
+      <span class="eyebrow">Attendance history</span>
+      <h2 class="panel-title">Your marked sessions</h2>
+      <p class="panel-copy">Class and subject shown when available.</p>
+      <div class="table-responsive">
+        <table class="table2">
+          <thead>
+            <tr>
+              <th>Date &amp; Time (UTC)</th>
+              <th>Class</th>
+              <th>Subject</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for r in records %}
+            <tr>
+              <td class="mono">{{ r['timestamp'] }}</td>
+              <td>{{ r['class_name'] or '-' }}{% if r['section'] %} — {{ r['section'] }}{% endif %}</td>
+              <td>{{ r['subject_name'] or '-' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="3" class="mono" style="color:var(--ink-soft);">No attendance recorded yet.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

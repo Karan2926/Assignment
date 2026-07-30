@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Admin — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link primary" href="/admin">Admin</a>
+      <a class="nav-link" href="/">Dashboard</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
+      <div>
+        <span class="eyebrow">Admin</span>
+        <h1>Classes, teachers &amp; access</h1>
+      </div>
+      <a href="/" class="btn2 btn2-outline">Back to dashboard</a>
+    </div>
+
+    <div class="step-rail">
+      <div class="step-chip active"><span class="n">1</span> Create class</div>
+      <div class="step-chip"><span class="n">2</span> Add subjects</div>
+      <div class="step-chip"><span class="n">3</span> Assign teachers</div>
+    </div>
+
+    <div class="row g-4">
+      <div class="col-lg-4">
+        <div class="card2">
+          <span class="eyebrow">Create class</span>
+          <form id="classForm" class="mt-2">
+            <label class="label2">Name</label>
+            <input class="input2 mb-2" name="name" placeholder="B.Tech CSE" required>
+            <label class="label2">Section</label>
+            <input class="input2 mb-2" name="section" placeholder="A">
+            <label class="label2">Academic year</label>
+            <input class="input2 mb-3" name="academic_year" placeholder="2025-26">
+            <button class="btn2 btn2-primary w-100" type="submit">Add class</button>
+          </form>
+        </div>
+
+        <div class="card2 mt-4">
+          <span class="eyebrow">Create subject</span>
+          <form id="subjectForm" class="mt-2">
+            <label class="label2">Class</label>
+            <select class="input2 mb-2" name="class_id" required>
+              <option value="">Select class</option>
+              {% for c in classes %}
+              <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <label class="label2">Subject name</label>
+            <input class="input2 mb-2" name="name" placeholder="Data Structures" required>
+            <label class="label2">Code</label>
+            <input class="input2 mb-3" name="code" placeholder="DS101">
+            <button class="btn2 btn2-primary w-100" type="submit">Add subject</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card2">
+          <span class="eyebrow">Create teacher</span>
+          <form id="teacherForm" class="mt-2">
+            <label class="label2">Full name</label>
+            <input class="input2 mb-2" name="full_name" placeholder="Prof. Sharma">
+            <label class="label2">Username</label>
+            <input class="input2 mb-2" name="username" required>
+            <label class="label2">Password</label>
+            <input class="input2 mb-3" name="password" type="password" required>
+            <button class="btn2 btn2-teal w-100" type="submit">Create teacher</button>
+          </form>
+        </div>
+
+        <div class="card2 mt-4">
+          <span class="eyebrow">Assign teacher → class + subject</span>
+          <form id="assignForm" class="mt-2">
+            <label class="label2">Teacher</label>
+            <select class="input2 mb-2" name="user_id" required>
+              <option value="">Select teacher</option>
+              {% for t in teachers %}
+              <option value="{{ t['id'] }}">{{ t['username'] }}{% if t['full_name'] %} ({{ t['full_name'] }}){% endif %}</option>
+              {% endfor %}
+            </select>
+            <label class="label2">Class</label>
+            <select class="input2 mb-2" name="class_id" id="assignClass" required>
+              <option value="">Select class</option>
+              {% for c in classes %}
+              <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+              {% endfor %}
+            </select>
+            <label class="label2">Subject</label>
+            <select class="input2 mb-3" name="subject_id" id="assignSubject" required>
+              <option value="">Select subject</option>
+            </select>
+            <button class="btn2 btn2-primary w-100" type="submit">Assign access</button>
+          </form>
+        </div>
+      </div>
+
+      <div class="col-lg-4">
+        <div class="card2">
+          <span class="eyebrow">Current classes</span>
+          <ul class="mt-2" style="padding-left:1.1rem;">
+            {% for c in classes %}
+            <li>{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %} <span class="mono" style="color:var(--ink-soft);">#{{ c['id'] }}</span></li>
+            {% else %}
+            <li class="mono" style="color:var(--ink-soft);">No classes yet</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="card2 mt-4">
+          <span class="eyebrow">Subjects</span>
+          <ul class="mt-2" style="padding-left:1.1rem;">
+            {% for s in subjects %}
+            <li>{{ s['subject_name'] if s['subject_name'] is defined else s['name'] }} · {{ s['class_name'] }}{% if s['section'] %} {{ s['section'] }}{% endif %}</li>
+            {% else %}
+            <li class="mono" style="color:var(--ink-soft);">No subjects yet</li>
+            {% endfor %}
+          </ul>
+        </div>
+        <div class="card2 mt-4">
+          <span class="eyebrow">Assignments</span>
+          <ul class="mt-2" style="padding-left:1.1rem;">
+            {% for a in assignments %}
+            <li class="mono" style="font-size:0.85rem;">{{ a['username'] }} → {{ a['class_name'] }}{% if a['section'] %} {{ a['section'] }}{% endif %} / {{ a['subject_name'] }}</li>
+            {% else %}
+            <li class="mono" style="color:var(--ink-soft);">No assignments yet</li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+async function postJson(url, form) {
+  const data = Object.fromEntries(new FormData(form).entries());
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || 'Request failed');
+  return body;
+}
+
+document.getElementById('classForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await postJson('/api/classes', e.target);
+    location.reload();
+  } catch (err) { alert(err.message); }
+});
+
+document.getElementById('subjectForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const classId = fd.get('class_id');
+  try {
+    const res = await fetch(`/api/classes/${classId}/subjects`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: fd.get('name'), code: fd.get('code') })
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || 'Failed');
+    location.reload();
+  } catch (err) { alert(err.message); }
+});
+
+document.getElementById('teacherForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await postJson('/api/teachers', e.target);
+    location.reload();
+  } catch (err) { alert(err.message); }
+});
+
+document.getElementById('assignClass').addEventListener('change', async (e) => {
+  const sel = document.getElementById('assignSubject');
+  sel.innerHTML = '<option value="">Select subject</option>';
+  if (!e.target.value) return;
+  const res = await fetch(`/api/classes/${e.target.value}/subjects`);
+  const data = await res.json();
+  (data.subjects || []).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.code ? `${s.name} (${s.code})` : s.name;
+    sel.appendChild(opt);
+  });
+});
+
+document.getElementById('assignForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    await postJson('/api/assignments', e.target);
+    location.reload();
+  } catch (err) { alert(err.message); }
+});
+</script>
+</body>
+</html>
