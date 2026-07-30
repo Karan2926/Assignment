@@ -13,20 +13,28 @@
 - Unified cosine similarity scoring + margin check
 - Per-student centroids + incremental embedding cache
 
-## Phase 2.5 — Production storage (7000 users) ✅ (this branch)
+## Phase 2.5 — Production storage (7000 users) ✅
 - Face centroids stored in SQLite (`face_embeddings`)
 - Capture JPEGs pruned after train (keep profile only)
 - Disk stats + admin prune endpoint
 - Indexes + WAL for larger attendance load
 - See `STORAGE.md`
 
+## Phase 2.6 — Production hardening (started) ✅
+- Gunicorn + Docker deploy (`DEPLOY.md`) — no debug server in production
+- Require `SECRET_KEY` when `FLASK_ENV=production`
+- Public register **off** by default; teacher/admin creates student logins
+- Upload authz (teachers only manage their students)
+- DB unique attendance per student/class/subject/day
+- Rate limits, session cookie flags, upload size cap
+- Backup script
+
 ## Phase 3 — College portal integration
 - Export format matching portal maintainer spec
 - Optional API push of daily attendance
 - Student ID mapping (roll ↔ portal ID)
 
-## Phase 4 — Production hardening
-- Strong secrets, HTTPS, rate limits
-- Audit log for deletes / overrides
-- Backup of DB + dataset
-- Role reviews and password reset flow
+## Phase 4 — Remaining production
+- InsightFace worker process (off web workers)
+- Postgres for multi-building concurrency
+- CSRF tokens, SSO, audit log

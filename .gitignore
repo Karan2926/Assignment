@@ -10,6 +10,10 @@ embedding_cache.pkl
 train_status.json
 dataset/*
 !dataset/.gitkeep
+.env
+backups/
+*.db-wal
+*.db-shm
 *.log
 .DS_Store
 .idea/

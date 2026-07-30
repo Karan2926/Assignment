@@ -18,9 +18,17 @@ from flask import (
 )
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import timedelta
 
 import config
 import db
+
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+except ImportError:  # pragma: no cover
+    Limiter = None
+    get_remote_address = None
 
 APP_DIR = config.APP_DIR
 DATASET_DIR = config.DATASET_DIR
@@ -30,8 +38,31 @@ TRAIN_STATUS_FILE = os.path.join(APP_DIR, "train_status.json")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = config.SECRET_KEY
+app.config["MAX_CONTENT_LENGTH"] = config.MAX_CONTENT_LENGTH_MB * 1024 * 1024
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=config.PERMANENT_SESSION_LIFETIME_HOURS)
+app.config["SESSION_COOKIE_HTTPONLY"] = config.SESSION_COOKIE_HTTPONLY
+app.config["SESSION_COOKIE_SAMESITE"] = config.SESSION_COOKIE_SAMESITE
+app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
 
 db.init_db()
+
+limiter = None
+if Limiter and get_remote_address:
+    limiter = Limiter(
+        get_remote_address,
+        app=app,
+        default_limits=[config.RATELIMIT_DEFAULT],
+        storage_uri="memory://",
+    )
+
+
+def _limit(rule):
+    def deco(f):
+        if limiter is None:
+            return f
+        return limiter.limit(rule)(f)
+
+    return deco
 
 
 def write_train_status(status_dict):
@@ -99,16 +130,39 @@ def _require_assignment():
 
 # ---------- Auth routes ----------
 @app.route("/register", methods=["GET", "POST"])
+@_limit(config.RATELIMIT_LOGIN)
 def register():
+    if not config.ALLOW_PUBLIC_REGISTER:
+        if request.method == "GET":
+            return render_template(
+                "register.html",
+                error="Public registration is disabled. Ask your teacher to create your login.",
+                disabled=True,
+                config_invite=False,
+            )
+        return jsonify({"error": "Public registration disabled"}), 403
+
     if request.method == "GET":
-        return render_template("register.html")
+        return render_template(
+            "register.html",
+            disabled=False,
+            config_invite=bool(config.REGISTER_INVITE_CODE),
+        )
 
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "").strip()
     roll = request.form.get("roll", "").strip()
+    invite = request.form.get("invite_code", "").strip()
+
+    if config.REGISTER_INVITE_CODE and invite != config.REGISTER_INVITE_CODE:
+        return render_template("register.html", error="Invalid invite code.", disabled=False)
 
     if not username or not password or not roll:
-        return render_template("register.html", error="All fields are required.")
+        return render_template("register.html", error="All fields are required.", disabled=False)
+    if len(password) < 8:
+        return render_template(
+            "register.html", error="Password must be at least 8 characters.", disabled=False
+        )
 
     with db.get_conn() as conn:
         c = conn.cursor()
@@ -118,12 +172,23 @@ def register():
             return render_template(
                 "register.html",
                 error="No student found with that roll number. Ask your teacher to add you first.",
+                disabled=False,
             )
         student_id = row["id"]
 
+        c.execute("SELECT id FROM users WHERE student_id=?", (student_id,))
+        if c.fetchone():
+            return render_template(
+                "register.html",
+                error="An account already exists for this student. Contact your teacher.",
+                disabled=False,
+            )
+
         c.execute("SELECT id FROM users WHERE username=?", (username,))
         if c.fetchone():
-            return render_template("register.html", error="That username is already taken.")
+            return render_template(
+                "register.html", error="That username is already taken.", disabled=False
+            )
 
         password_hash = generate_password_hash(password)
         now = datetime.datetime.utcnow().isoformat()
@@ -136,6 +201,7 @@ def register():
 
 
 @app.route("/login", methods=["GET", "POST"])
+@_limit(config.RATELIMIT_LOGIN)
 def login():
     if request.method == "GET":
         return render_template("login.html")
@@ -152,6 +218,8 @@ def login():
     if not row or not check_password_hash(row["password_hash"], password):
         return render_template("login.html", error="Invalid username or password.")
 
+    session.clear()
+    session.permanent = True
     session["user_id"] = row["id"]
     session["role"] = row["role"]
     session["student_id"] = row["student_id"]
@@ -510,18 +578,24 @@ def upload_face():
     student_id = request.form.get("student_id")
     if not student_id:
         return jsonify({"error": "student_id required"}), 400
+    try:
+        sid = int(student_id)
+    except ValueError:
+        return jsonify({"error": "invalid student_id"}), 400
+
+    if not db.teacher_can_manage_student(session["user_id"], session.get("role"), sid):
+        return jsonify({"error": "Not authorized for this student"}), 403
+
     files = request.files.getlist("images[]")
-    # Hard cap — temporary captures only; pruned after train
     files = files[: config.MAX_CAPTURE_IMAGES]
     saved = 0
-    folder = os.path.join(DATASET_DIR, student_id)
+    folder = os.path.join(DATASET_DIR, str(sid))
     os.makedirs(folder, exist_ok=True)
     for f in files:
         try:
             fname = f"{datetime.datetime.utcnow().timestamp():.6f}_{saved}.jpg"
             path = os.path.join(folder, fname)
             f.save(path)
-            # Compress / resize profile once
             if saved == 0:
                 _save_compact_profile(path, os.path.join(folder, "profile.jpg"))
             saved += 1
@@ -554,9 +628,53 @@ def _save_compact_profile(src_path: str, dest_path: str) -> None:
         shutil.copyfile(src_path, dest_path)
 
 
+@app.route("/api/students/<int:sid>/create_login", methods=["POST"])
+@role_required("teacher", "admin")
+def create_student_login(sid):
+    """Teacher/admin issues a student account (public register is disabled by default)."""
+    if not db.teacher_can_manage_student(session["user_id"], session.get("role"), sid):
+        return jsonify({"error": "Not authorized for this student"}), 403
+
+    data = request.get_json(silent=True) or request.form
+    username = (data.get("username") or "").strip()
+    password = (data.get("password") or "").strip()
+    if not username or not password:
+        return jsonify({"error": "username and password required"}), 400
+    if len(password) < 8:
+        return jsonify({"error": "password must be at least 8 characters"}), 400
+
+    with db.get_conn() as conn:
+        st = conn.execute("SELECT id FROM students WHERE id=?", (sid,)).fetchone()
+        if not st:
+            return jsonify({"error": "student not found"}), 404
+        existing = conn.execute(
+            "SELECT id FROM users WHERE student_id=? OR username=?", (sid, username)
+        ).fetchone()
+        if existing:
+            return jsonify({"error": "login already exists for student or username"}), 409
+        now = datetime.datetime.utcnow().isoformat()
+        cur = conn.execute(
+            """
+            INSERT INTO users (username, password_hash, role, student_id, created_at)
+            VALUES (?, ?, 'student', ?, ?)
+            """,
+            (username, generate_password_hash(password), sid, now),
+        )
+        user_id = cur.lastrowid
+    return jsonify({"user_id": user_id, "username": username}), 201
+
+
 @app.route("/student_photo/<int:sid>", methods=["GET"])
 @login_required
 def student_photo(sid):
+    role = session.get("role")
+    if role == "student" and session.get("student_id") != sid:
+        abort(403)
+    if role in ("teacher", "admin"):
+        if not db.teacher_can_manage_student(session["user_id"], role, sid):
+            # Admin always ok via helper; teachers restricted
+            if role != "admin":
+                abort(403)
     profile_path = os.path.join(DATASET_DIR, str(sid), "profile.jpg")
     if os.path.exists(profile_path):
         return send_file(profile_path, mimetype="image/jpeg")
@@ -618,7 +736,7 @@ def prune_captures():
 
 
 @app.route("/train_status", methods=["GET"])
-@login_required
+@role_required("teacher", "admin")
 def train_status():
     return jsonify(read_train_status())
 
@@ -632,6 +750,7 @@ def mark_attendance_page():
 
 @app.route("/recognize_face", methods=["POST"])
 @role_required("teacher", "admin")
+@_limit(config.RATELIMIT_RECOGNIZE)
 def recognize_face():
     class_id, subject_id, err = _require_assignment()
     if err:
@@ -690,7 +809,7 @@ def recognize_face():
         ), 200
     except Exception as e:
         app.logger.exception("recognize error")
-        return jsonify({"recognized": False, "error": str(e)}), 500
+        return jsonify({"recognized": False, "error": "recognition failed"}), 500
 
 
 @app.route("/attendance_record", methods=["GET"])
@@ -850,10 +969,7 @@ def students_list():
 @app.route("/students/<int:sid>", methods=["DELETE"])
 @role_required("admin")
 def delete_student(sid):
-    with db.get_conn() as conn:
-        conn.execute("DELETE FROM students WHERE id=?", (sid,))
-        conn.execute("DELETE FROM attendance WHERE student_id=?", (sid,))
-        conn.execute("DELETE FROM enrollments WHERE student_id=?", (sid,))
+    db.delete_student_cascade(sid)
     folder = os.path.join(DATASET_DIR, str(sid))
     if os.path.isdir(folder):
         shutil.rmtree(folder, ignore_errors=True)
@@ -862,6 +978,7 @@ def delete_student(sid):
 
 @app.route("/recognize_classroom", methods=["POST"])
 @role_required("teacher", "admin")
+@_limit(config.RATELIMIT_RECOGNIZE)
 def recognize_classroom():
     class_id, subject_id, err = _require_assignment()
     if err:
@@ -961,7 +1078,7 @@ def recognize_classroom():
 
     except Exception as e:
         app.logger.exception("classroom recognize error")
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "recognition failed"}), 500
 
 
 @app.route("/mark_attendance_classroom", methods=["GET"])
@@ -1108,4 +1225,7 @@ def check_face():
 
 
 if __name__ == "__main__":
+    # Development only. Production: gunicorn -c gunicorn.conf.py wsgi:app
+    if config.IS_PRODUCTION:
+        raise SystemExit("Refusing to start debug server in production. Use gunicorn (see DEPLOY.md).")
     app.run(debug=True, port=5001)

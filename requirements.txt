@@ -7,3 +7,5 @@ insightface>=0.7.3
 onnxruntime>=1.16.0
 pandas>=2.0.0
 Pillow>=10.0.0
+gunicorn>=22.0.0
+Flask-Limiter>=3.5.0

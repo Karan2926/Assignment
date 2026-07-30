@@ -171,6 +171,42 @@ def init_db() -> None:
 
         _ensure_columns(
             conn,
+            "attendance",
+            {"attendance_day": "TEXT"},
+        )
+
+        # Backfill attendance_day from timestamp for older rows
+        c.execute(
+            """
+            UPDATE attendance
+            SET attendance_day = date(timestamp)
+            WHERE attendance_day IS NULL AND timestamp IS NOT NULL
+            """
+        )
+
+        # Enforce one present mark per student/class/subject/day (critical under concurrency)
+        c.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_attendance_day
+            ON attendance(student_id, class_id, subject_id, attendance_day)
+            WHERE student_id IS NOT NULL
+              AND class_id IS NOT NULL
+              AND subject_id IS NOT NULL
+              AND attendance_day IS NOT NULL
+            """
+        )
+
+        # Prefer unique rolls when present (ignore blank)
+        c.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_students_roll
+            ON students(roll)
+            WHERE roll IS NOT NULL AND TRIM(roll) != ''
+            """
+        )
+
+        _ensure_columns(
+            conn,
             "students",
             {"class_id": "INTEGER"},
         )
@@ -351,27 +387,53 @@ def mark_present(
     with get_conn() as conn:
         c = conn.cursor()
         for sid in student_ids:
-            c.execute(
-                """
-                SELECT id FROM attendance
-                WHERE student_id=? AND class_id=? AND subject_id=? AND date(timestamp)=?
-                """,
-                (sid, class_id, subject_id, today),
-            )
-            if c.fetchone():
-                continue
             row = c.execute("SELECT name FROM students WHERE id=?", (sid,)).fetchone()
             name = row["name"] if row else "Unknown"
-            c.execute(
-                """
-                INSERT INTO attendance
-                  (student_id, name, timestamp, class_id, subject_id, marked_by, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (sid, name, ts, class_id, subject_id, marked_by, source),
-            )
-            saved += 1
+            try:
+                c.execute(
+                    """
+                    INSERT INTO attendance
+                      (student_id, name, timestamp, class_id, subject_id, marked_by, source, attendance_day)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (sid, name, ts, class_id, subject_id, marked_by, source, today),
+                )
+                if c.rowcount:
+                    saved += 1
+            except sqlite3.IntegrityError:
+                # Already marked today for this class+subject
+                continue
     return saved
+
+
+def teacher_can_manage_student(user_id: int, role: str, student_id: int) -> bool:
+    """True if admin, or teacher assigned to a class this student is enrolled in."""
+    if role == "admin":
+        return True
+    class_ids = teacher_class_ids(user_id, role)
+    if not class_ids:
+        return False
+    enrolled = set()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT class_id FROM enrollments WHERE student_id=?
+            UNION
+            SELECT class_id FROM students WHERE id=? AND class_id IS NOT NULL
+            """,
+            (student_id, student_id),
+        ).fetchall()
+        enrolled = {r[0] for r in rows}
+    return bool(enrolled & class_ids)
+
+
+def delete_student_cascade(student_id: int) -> None:
+    with get_conn() as conn:
+        conn.execute("DELETE FROM face_embeddings WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM enrollments WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM attendance WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM users WHERE student_id=?", (student_id,))
+        conn.execute("DELETE FROM students WHERE id=?", (student_id,))
 
 
 def upsert_face_centroid(student_id: int, centroid, sample_count: int) -> None:
