@@ -11,12 +11,9 @@ from __future__ import annotations
 
 import os
 import pickle
-from typing import Iterable, Optional, Sequence, Set
+from typing import Iterable, Optional, Set
 
-import cv2
 import numpy as np
-from insightface.app import FaceAnalysis
-from sklearn.neighbors import KNeighborsClassifier
 
 MODEL_PATH = "model.pkl"
 CACHE_PATH = "embedding_cache.pkl"
@@ -27,15 +24,74 @@ CLASSROOM_SIM_THRESHOLD = 0.36
 # Require winner to beat 2nd place by this margin when both are in-class.
 MARGIN = 0.03
 
-_face_apps: dict[tuple[int, int], FaceAnalysis] = {}
+_face_apps: dict[tuple[int, int], object] = {}
 
 
-def get_face_app(det_size: tuple[int, int] = (640, 640)) -> FaceAnalysis:
+def prune_capture_images(dataset_dir: str, keep_profile: bool = True) -> dict:
+    """
+    Delete enrollment capture JPEGs after embeddings are stored.
+    Keeps only profile.jpg per student — critical for ~7000-user disk budget.
+    """
+    deleted = 0
+    bytes_freed = 0
+    students = 0
+    if not os.path.isdir(dataset_dir):
+        return {"deleted": 0, "bytes_freed": 0, "students": 0}
+
+    for sid in os.listdir(dataset_dir):
+        folder = os.path.join(dataset_dir, sid)
+        if not os.path.isdir(folder):
+            continue
+        students += 1
+        for fn in os.listdir(folder):
+            if keep_profile and fn == "profile.jpg":
+                continue
+            if not fn.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
+            path = os.path.join(folder, fn)
+            try:
+                bytes_freed += os.path.getsize(path)
+                os.remove(path)
+                deleted += 1
+            except OSError:
+                pass
+    return {"deleted": deleted, "bytes_freed": bytes_freed, "students": students}
+
+
+def dataset_disk_usage(dataset_dir: str) -> dict:
+    total = 0
+    files = 0
+    students = 0
+    if not os.path.isdir(dataset_dir):
+        return {"bytes": 0, "files": 0, "students": 0, "mb": 0}
+    for sid in os.listdir(dataset_dir):
+        folder = os.path.join(dataset_dir, sid)
+        if not os.path.isdir(folder):
+            continue
+        students += 1
+        for root, _, filenames in os.walk(folder):
+            for fn in filenames:
+                path = os.path.join(root, fn)
+                try:
+                    total += os.path.getsize(path)
+                    files += 1
+                except OSError:
+                    pass
+    return {
+        "bytes": total,
+        "files": files,
+        "students": students,
+        "mb": round(total / (1024 * 1024), 2),
+    }
+
+
+def get_face_app(det_size: tuple[int, int] = (640, 640)):
     """Lazy-load InsightFace; cache one instance per detection size."""
+    from insightface.app import FaceAnalysis
+
     key = (int(det_size[0]), int(det_size[1]))
     if key not in _face_apps:
         app = FaceAnalysis(name="buffalo_l")
-        # ctx_id=-1 forces CPU if no GPU; 0 uses GPU when available.
         ctx = 0
         try:
             app.prepare(ctx_id=ctx, det_size=key)
@@ -45,7 +101,9 @@ def get_face_app(det_size: tuple[int, int] = (640, 640)) -> FaceAnalysis:
     return _face_apps[key]
 
 
-def _decode_image(stream_or_bytes) -> Optional[np.ndarray]:
+def _decode_image(stream_or_bytes):
+    import cv2
+
     data = stream_or_bytes.read()
     arr = np.frombuffer(data, np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
@@ -114,6 +172,7 @@ def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 28):
     long_edge = max(h, w)
     if long_edge < 1600:
         scale = 1600 / long_edge
+        import cv2
         img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
 
     # Higher det_size finds more small faces in crowded frames
@@ -140,10 +199,35 @@ def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 28):
 
 
 def load_model_if_exists():
-    if not os.path.exists(MODEL_PATH):
-        return None
-    with open(MODEL_PATH, "rb") as f:
-        return pickle.load(f)
+    """Load matcher bundle; prefer DB centroids when available (production path)."""
+    bundle = None
+    if os.path.exists(MODEL_PATH):
+        with open(MODEL_PATH, "rb") as f:
+            bundle = pickle.load(f)
+
+    try:
+        import db as dbmod
+
+        db_centroids = dbmod.load_face_centroids()
+    except Exception:
+        db_centroids = {}
+
+    if db_centroids:
+        if bundle is None:
+            bundle = {
+                "version": 3,
+                "centroids": db_centroids,
+                "X": None,
+                "y": None,
+                "clf": None,
+            }
+        else:
+            merged = dict(bundle.get("centroids") or {})
+            merged.update(db_centroids)
+            bundle["centroids"] = merged
+            bundle["version"] = max(int(bundle.get("version") or 2), 3)
+        bundle["student_ids"] = sorted(bundle["centroids"].keys())
+    return bundle
 
 
 def _normalize_allowed(allowed_ids: Optional[Iterable[int]]) -> Optional[Set[int]]:
@@ -244,12 +328,17 @@ def _file_signature(path: str) -> str:
     return f"{st.st_mtime_ns}:{st.st_size}"
 
 
-def train_model_background(dataset_dir, progress_callback=None):
+def train_model_background(dataset_dir, progress_callback=None, prune_after=None):
     """
-    Build gallery + centroids. Reuses embedding_cache.pkl so adding one student
-    does not re-embed the whole college.
+    Build gallery + centroids, save to DB, then prune capture JPEGs by default.
+    Required for college-scale disk (keep profile.jpg only).
     """
-    cache = _load_cache()  # {sid_str: {filename: {"sig": ..., "emb": ndarray}}}
+    import config
+
+    if prune_after is None:
+        prune_after = not config.KEEP_CAPTURE_IMAGES
+
+    cache = _load_cache()
     student_dirs = [
         d
         for d in os.listdir(dataset_dir)
@@ -260,6 +349,7 @@ def train_model_background(dataset_dir, progress_callback=None):
     X = []
     y = []
     centroids: dict[int, np.ndarray] = {}
+    sample_counts: dict[int, int] = {}
 
     for sid in student_dirs:
         folder = os.path.join(dataset_dir, sid)
@@ -268,6 +358,27 @@ def train_model_background(dataset_dir, progress_callback=None):
             for f in os.listdir(folder)
             if f.lower().endswith((".jpg", ".jpeg", ".png")) and f != "profile.jpg"
         ]
+        if not files and os.path.exists(os.path.join(folder, "profile.jpg")):
+            files = ["profile.jpg"]
+
+        if not files:
+            try:
+                import db as dbmod
+
+                existing = dbmod.load_face_centroids([int(sid)])
+                if int(sid) in existing:
+                    centroids[int(sid)] = existing[int(sid)]
+                    sample_counts[int(sid)] = 1
+                    X.append(existing[int(sid)])
+                    y.append(int(sid))
+            except Exception:
+                pass
+            processed += 1
+            if progress_callback:
+                pct = int((processed / total_students) * 80)
+                progress_callback(pct, f"Processed {processed}/{total_students} students")
+            continue
+
         sid_key = str(sid)
         student_cache = cache.get(sid_key, {})
         new_student_cache = {}
@@ -280,6 +391,7 @@ def train_model_background(dataset_dir, progress_callback=None):
             if cached and cached.get("sig") == sig and cached.get("emb") is not None:
                 emb = np.asarray(cached["emb"], dtype=np.float32)
             else:
+                import cv2
                 img = cv2.imread(path)
                 if img is None:
                     continue
@@ -301,10 +413,10 @@ def train_model_background(dataset_dir, progress_callback=None):
         cache[sid_key] = new_student_cache
         if embs:
             stacked = np.stack(embs)
-            # Mean then re-normalize → stable class prototype
             mean = stacked.mean(axis=0)
             norm = np.linalg.norm(mean) + 1e-9
             centroids[int(sid)] = (mean / norm).astype(np.float32)
+            sample_counts[int(sid)] = len(embs)
 
         processed += 1
         if progress_callback:
@@ -313,40 +425,66 @@ def train_model_background(dataset_dir, progress_callback=None):
                 pct, f"Processed {processed}/{total_students} students (cached when possible)"
             )
 
+    if prune_after:
+        cache = {}
     _save_cache(cache)
 
-    if len(X) == 0:
+    if len(X) == 0 and not centroids:
         if progress_callback:
             progress_callback(0, "No training data found")
         return
 
-    X = np.stack(X).astype(np.float32)
-    y = np.array(y)
-
     if progress_callback:
-        progress_callback(85, "Building matcher...")
+        progress_callback(85, "Saving embeddings to database...")
 
-    # Keep a light KNN for backward compatibility / debugging; matching uses centroids+cosine.
-    n_neighbors = min(3, len(set(y.tolist())))
-    clf = KNeighborsClassifier(n_neighbors=n_neighbors, metric="euclidean")
-    clf.fit(X, y)
+    try:
+        import db as dbmod
+
+        for sid, vec in centroids.items():
+            dbmod.upsert_face_centroid(sid, vec, sample_counts.get(sid, 1))
+    except Exception as e:
+        if progress_callback:
+            progress_callback(85, f"DB save warning: {e}")
+
+    if X:
+        X_arr = np.stack(X).astype(np.float32)
+        y_arr = np.array(y)
+        n_neighbors = min(3, len(set(y_arr.tolist())))
+        from sklearn.neighbors import KNeighborsClassifier
+        clf = KNeighborsClassifier(n_neighbors=n_neighbors, metric="euclidean")
+        clf.fit(X_arr, y_arr)
+    else:
+        X_arr, y_arr, clf = None, None, None
 
     bundle = {
-        "version": 2,
+        "version": 3,
         "clf": clf,
-        "X": X,
-        "y": y,
+        "X": X_arr,
+        "y": y_arr,
         "centroids": centroids,
         "student_ids": sorted(centroids.keys()),
     }
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(bundle, f)
 
+    prune_stats = {"deleted": 0, "bytes_freed": 0}
+    if prune_after:
+        if progress_callback:
+            progress_callback(95, "Pruning capture images (keeping profile only)...")
+        prune_stats = prune_capture_images(dataset_dir, keep_profile=True)
+        if os.path.exists(CACHE_PATH):
+            try:
+                os.remove(CACHE_PATH)
+            except OSError:
+                pass
+
     if progress_callback:
-        progress_callback(
-            100,
-            f"Training complete — {len(centroids)} students, {len(X)} embeddings",
-        )
+        freed_mb = round(prune_stats.get("bytes_freed", 0) / (1024 * 1024), 2)
+        msg = f"Ready — {len(centroids)} students in DB"
+        if prune_after:
+            msg += f", freed {freed_mb} MB captures"
+        progress_callback(100, msg)
+
 
 
 def check_face_quality(stream_or_bytes, min_face_ratio=0.04):

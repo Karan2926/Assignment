@@ -7,11 +7,18 @@
 - Attendance scoped by class/subject/day
 - Teacher-only visibility of records/analytics/CSV
 
-## Phase 2 — Recognition at 80+ scale ✅ (this branch)
+## Phase 2 — Recognition at 80+ scale ✅
 - Match only against the selected class roster (not whole college)
 - Higher-res classroom detection (960 det size + upscale + NMS)
 - Unified cosine similarity scoring + margin check
 - Per-student centroids + incremental embedding cache
+
+## Phase 2.5 — Production storage (7000 users) ✅ (this branch)
+- Face centroids stored in SQLite (`face_embeddings`)
+- Capture JPEGs pruned after train (keep profile only)
+- Disk stats + admin prune endpoint
+- Indexes + WAL for larger attendance load
+- See `STORAGE.md`
 
 ## Phase 3 — College portal integration
 - Export format matching portal maintainer spec

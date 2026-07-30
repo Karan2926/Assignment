@@ -19,16 +19,17 @@ from flask import (
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
+import config
 import db
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DATASET_DIR = os.path.join(APP_DIR, "dataset")
+APP_DIR = config.APP_DIR
+DATASET_DIR = config.DATASET_DIR
 os.makedirs(DATASET_DIR, exist_ok=True)
 
 TRAIN_STATUS_FILE = os.path.join(APP_DIR, "train_status.json")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
-app.secret_key = os.environ.get("SECRET_KEY", "change-this-to-a-random-secret-in-production")
+app.secret_key = config.SECRET_KEY
 
 db.init_db()
 
@@ -510,6 +511,8 @@ def upload_face():
     if not student_id:
         return jsonify({"error": "student_id required"}), 400
     files = request.files.getlist("images[]")
+    # Hard cap — temporary captures only; pruned after train
+    files = files[: config.MAX_CAPTURE_IMAGES]
     saved = 0
     folder = os.path.join(DATASET_DIR, student_id)
     os.makedirs(folder, exist_ok=True)
@@ -518,12 +521,37 @@ def upload_face():
             fname = f"{datetime.datetime.utcnow().timestamp():.6f}_{saved}.jpg"
             path = os.path.join(folder, fname)
             f.save(path)
+            # Compress / resize profile once
             if saved == 0:
-                shutil.copyfile(path, os.path.join(folder, "profile.jpg"))
+                _save_compact_profile(path, os.path.join(folder, "profile.jpg"))
             saved += 1
         except Exception as e:
             app.logger.error("save error: %s", e)
-    return jsonify({"saved": saved})
+    return jsonify(
+        {
+            "saved": saved,
+            "note": "Captures are temporary. After Train Model, only profile.jpg is kept.",
+        }
+    )
+
+
+def _save_compact_profile(src_path: str, dest_path: str) -> None:
+    """Store a small profile thumbnail for UI — not used as the face gallery."""
+    try:
+        import cv2
+
+        img = cv2.imread(src_path)
+        if img is None:
+            shutil.copyfile(src_path, dest_path)
+            return
+        h, w = img.shape[:2]
+        edge = max(h, w)
+        if edge > config.PROFILE_MAX_EDGE:
+            scale = config.PROFILE_MAX_EDGE / edge
+            img = cv2.resize(img, (int(w * scale), int(h * scale)))
+        cv2.imwrite(dest_path, img, [int(cv2.IMWRITE_JPEG_QUALITY), config.JPEG_QUALITY])
+    except Exception:
+        shutil.copyfile(src_path, dest_path)
 
 
 @app.route("/student_photo/<int:sid>", methods=["GET"])
@@ -556,6 +584,37 @@ def train_model_route():
     t.daemon = True
     t.start()
     return jsonify({"status": "started"}), 202
+
+
+@app.route("/storage_stats", methods=["GET"])
+@role_required("admin", "teacher")
+def storage_stats():
+    from model import dataset_disk_usage
+
+    usage = dataset_disk_usage(DATASET_DIR)
+    return jsonify(
+        {
+            "dataset": usage,
+            "face_embeddings": db.face_embedding_count(),
+            "keep_capture_images": config.KEEP_CAPTURE_IMAGES,
+            "max_capture_images": config.MAX_CAPTURE_IMAGES,
+            "guidance": {
+                "embeddings_mb_for_7000": round(7000 * 2 / 1024, 2),
+                "profiles_mb_for_7000_est": round(7000 * 40 / 1024, 1),
+                "raw_48jpg_mb_for_7000_est": round(7000 * 48 * 50 / 1024, 0),
+            },
+        }
+    )
+
+
+@app.route("/prune_captures", methods=["POST"])
+@role_required("admin")
+def prune_captures():
+    """Admin: free disk by deleting enrollment frames (keeps profile.jpg)."""
+    from model import prune_capture_images
+
+    stats = prune_capture_images(DATASET_DIR, keep_profile=True)
+    return jsonify(stats)
 
 
 @app.route("/train_status", methods=["GET"])

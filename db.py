@@ -1,4 +1,4 @@
-"""Database schema, migrations, and access helpers for Phase 1."""
+"""Database schema, migrations, and access helpers — college scale."""
 
 from __future__ import annotations
 
@@ -8,14 +8,19 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Any, Iterable, Optional
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(APP_DIR, "attendance.db")
+import config
+
+APP_DIR = config.APP_DIR
+DB_PATH = config.DB_PATH
 
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
         conn.commit()
@@ -133,6 +138,35 @@ def init_db() -> None:
                 FOREIGN KEY(class_id) REFERENCES classes(id)
             )
             """
+        )
+        # Production: store face centroids in DB (~2KB/student), not 48 JPEGs forever.
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS face_embeddings (
+                student_id INTEGER PRIMARY KEY,
+                centroid BLOB NOT NULL,
+                dim INTEGER NOT NULL,
+                sample_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT,
+                FOREIGN KEY(student_id) REFERENCES students(id)
+            )
+            """
+        )
+
+        # Indexes for ~7000 students / heavy attendance reads
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attendance_lookup ON attendance(student_id, class_id, subject_id, timestamp)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_attendance_class_day ON attendance(class_id, subject_id, timestamp)"
+        )
+        c.execute("CREATE INDEX IF NOT EXISTS idx_students_roll ON students(roll)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_id)")
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_enrollments_class ON enrollments(class_id, student_id)"
+        )
+        c.execute(
+            "CREATE INDEX IF NOT EXISTS idx_assignments_user ON teacher_assignments(user_id)"
         )
 
         _ensure_columns(
@@ -338,3 +372,57 @@ def mark_present(
             )
             saved += 1
     return saved
+
+
+def upsert_face_centroid(student_id: int, centroid, sample_count: int) -> None:
+    """Persist a L2-normalized embedding centroid (float32 bytes)."""
+    import numpy as np
+
+    vec = np.asarray(centroid, dtype=np.float32).reshape(-1)
+    now = datetime.datetime.utcnow().isoformat()
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO face_embeddings (student_id, centroid, dim, sample_count, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(student_id) DO UPDATE SET
+              centroid=excluded.centroid,
+              dim=excluded.dim,
+              sample_count=excluded.sample_count,
+              updated_at=excluded.updated_at
+            """,
+            (int(student_id), vec.tobytes(), int(vec.size), int(sample_count), now),
+        )
+
+
+def load_face_centroids(allowed_ids: Optional[Iterable[int]] = None) -> dict[int, Any]:
+    """Return {student_id: np.float32 vector} optionally filtered to a class roster."""
+    import numpy as np
+
+    with get_conn() as conn:
+        if allowed_ids is None:
+            rows = conn.execute(
+                "SELECT student_id, centroid, dim FROM face_embeddings"
+            ).fetchall()
+        else:
+            ids = list({int(x) for x in allowed_ids})
+            if not ids:
+                return {}
+            placeholders = ",".join("?" * len(ids))
+            rows = conn.execute(
+                f"SELECT student_id, centroid, dim FROM face_embeddings WHERE student_id IN ({placeholders})",
+                ids,
+            ).fetchall()
+
+    out = {}
+    for r in rows:
+        vec = np.frombuffer(r["centroid"], dtype=np.float32)
+        if r["dim"] and len(vec) == r["dim"]:
+            out[int(r["student_id"])] = vec.copy()
+    return out
+
+
+def face_embedding_count() -> int:
+    with get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) AS n FROM face_embeddings").fetchone()
+    return int(row["n"] if row else 0)
