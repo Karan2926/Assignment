@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Mark Attendance — Digital Attendance</title>
@@ -18,15 +18,16 @@
       <a class="nav-link primary" href="/mark_attendance">Mark Attendance</a>
       <a class="nav-link" href="/mark_attendance_classroom">Classroom Photo</a>
       <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link" href="/analytics">Analytics</a>
       <a class="nav-link" href="/logout">Log Out</a>
     </div>
   </nav>
 
-  <div class="page" style="max-width: 1000px;">
-    <div class="page-head">
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
       <div>
         <span class="eyebrow">Live recognition</span>
-        <h1 style="margin:0; font-size:1.6rem;">Mark Attendance</h1>
+        <h1>Mark Attendance</h1>
       </div>
       <div class="d-flex gap-2">
         <button id="startMarkBtn" class="btn2 btn2-teal">Start</button>
@@ -34,9 +35,17 @@
       </div>
     </div>
 
-    <div class="card2 mb-4">
+    <div class="step-rail" aria-label="Live mark steps">
+      <div class="step-chip active"><span class="n">1</span> Pick class &amp; subject</div>
+      <div class="step-chip"><span class="n">2</span> Start camera</div>
+      <div class="step-chip"><span class="n">3</span> Auto-save presents</div>
+    </div>
+
+    <div class="card2 mb-3">
       <span class="eyebrow">Session</span>
-      <div class="session-bar mt-2">
+      <h2 class="panel-title">Where are you marking?</h2>
+      <p class="panel-copy">One present mark per student · class · subject · day.</p>
+      <div class="session-bar">
         <div>
           <label class="label2">Class</label>
           <select id="classSelect" class="input2">
@@ -53,34 +62,44 @@
           </select>
         </div>
       </div>
-      <p class="mono" style="font-size:0.8rem; color:var(--ink-soft); margin:0;">
-        Attendance is saved once per student per class+subject per day.
-      </p>
     </div>
 
-    <div class="row g-4">
-      <div class="col-md-7">
-        <div class="card2">
-          <div class="scan-frame">
-            <video id="markVideo" width="560" height="420" autoplay muted style="display:block; width:100%; height:auto;"></video>
-            <div class="scan-corners">
-              <span></span><span></span><span></span><span></span>
+    <div class="workspace-split">
+      <div class="card2">
+        <span class="eyebrow">Camera stage</span>
+        <h2 class="panel-title">Live scan</h2>
+        <p class="panel-copy">Students walk up one by one. Recognition runs about every second.</p>
+        <div class="scan-stage" id="markStage">
+          <video id="markVideo" width="640" height="480" autoplay muted playsinline></video>
+          <div class="scan-corners">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div class="scan-stage-empty">
+            <div>
+              <strong>Select class &amp; subject, then Start</strong>
+              <span>Live face recognition for entry desk</span>
             </div>
           </div>
-          <div id="markStatus" class="mt-3 mono" style="font-size:0.8rem; color:var(--ink-soft);">Waiting...</div>
+        </div>
+        <div class="capture-meter">
+          <div id="markStatus" class="mono" style="font-size:0.85rem; color:var(--ink-soft);">Waiting...</div>
         </div>
       </div>
 
-      <div class="col-md-5">
-        <div class="card2">
-          <span class="eyebrow">This session</span>
-          <h5 style="margin:0 0 1rem;">Recognized</h5>
-          <ul id="recognizedList" class="list-group" style="list-style:none; padding:0; margin:0;"></ul>
-        </div>
+      <div class="card2">
+        <span class="eyebrow">This session</span>
+        <h2 class="panel-title">Recognized</h2>
+        <p class="panel-copy">New matches appear here as they are saved.</p>
+        <ul id="recognizedList" style="list-style:none; padding:0; margin:0; display:grid; gap:0.55rem;"></ul>
       </div>
     </div>
   </div>
 
 <script src="{{ url_for('static', filename='js/camera_mark.js') }}"></script>
+<script>
+  const stage = document.getElementById('markStage');
+  document.getElementById('startMarkBtn').addEventListener('click', () => stage.classList.add('is-live'));
+  document.getElementById('stopMarkBtn').addEventListener('click', () => stage.classList.remove('is-live'));
+</script>
 </body>
 </html>

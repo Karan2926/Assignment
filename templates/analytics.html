@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Analytics — Digital Attendance</title>
@@ -23,17 +23,20 @@
     </div>
   </nav>
 
-  <div class="page" style="max-width: 1000px;">
-    <div class="page-head">
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
       <div>
         <span class="eyebrow">Insights</span>
-        <h1 style="margin:0; font-size:1.6rem;">Attendance Analytics</h1>
+        <h1>Attendance Analytics</h1>
       </div>
-      <a href="/" class="btn2 btn2-outline">Back to Dashboard</a>
+      <a href="/" class="btn2 btn2-outline">Back to dashboard</a>
     </div>
 
-    <div class="card2 mb-4">
-      <form method="GET" class="session-bar">
+    <div class="card2 mb-3">
+      <span class="eyebrow">Scope</span>
+      <h2 class="panel-title">Filter by class &amp; subject</h2>
+      <p class="panel-copy">Percentages use days present since each student was added.</p>
+      <form method="GET" class="session-bar" style="grid-template-columns: 1fr 1fr auto;">
         <div>
           <label class="label2">Class</label>
           <select name="class_id" id="classSelect" class="input2">
@@ -58,8 +61,10 @@
     </div>
 
     <div class="card2">
+      <span class="eyebrow">Class performance</span>
+      <h2 class="panel-title">{% if rows %}{{ rows|length }} student(s){% else %}No students{% endif %}</h2>
       {% if rows %}
-      <div class="table-responsive">
+      <div class="table-responsive mt-3">
         <table class="table2">
           <thead>
             <tr><th>Name</th><th>Roll</th><th>Days Present</th><th>Since</th><th>Attendance %</th></tr>
@@ -82,7 +87,7 @@
         </table>
       </div>
       {% else %}
-      <p class="mono" style="color:var(--ink-soft);">No students in the selected scope.</p>
+      <p class="mono mt-3" style="color:var(--ink-soft);">No students in the selected scope.</p>
       {% endif %}
     </div>
   </div>

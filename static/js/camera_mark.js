@@ -84,7 +84,7 @@ async function captureAndRecognize() {
       if (!recognizedIds.has(j.student_id)) {
         recognizedIds.add(j.student_id);
         const li = document.createElement("li");
-        li.className = "list-group-item";
+        li.style.cssText = "padding:0.7rem 0.85rem;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,0.75);";
         li.innerText = `${j.name} — ${new Date().toLocaleTimeString()}`;
         recognizedList.prepend(li);
       }

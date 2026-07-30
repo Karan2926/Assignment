@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>Records — Digital Attendance</title>
@@ -23,20 +23,23 @@
     </div>
   </nav>
 
-  <div class="page" style="max-width: 1100px;">
-    <div class="page-head">
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
       <div>
         <span class="eyebrow">History</span>
-        <h1 style="margin:0; font-size:1.6rem;">Attendance Records</h1>
+        <h1>Attendance Records</h1>
       </div>
-      <div class="d-flex gap-2">
-        <a class="btn2 btn2-outline" href="/download_csv">Download CSV</a>
-        <a class="btn2 btn2-outline" href="/">Back</a>
+      <div class="d-flex gap-2 flex-wrap">
+        <a class="btn2 btn2-primary" href="/download_csv">Download CSV</a>
+        <a class="btn2 btn2-outline" href="/">Back to dashboard</a>
       </div>
     </div>
 
-    <div class="card2">
-      <form method="GET" class="session-bar">
+    <div class="card2 mb-3">
+      <span class="eyebrow">Filters</span>
+      <h2 class="panel-title">Narrow the list</h2>
+      <p class="panel-copy">Only classes you can access are shown.</p>
+      <form method="GET" class="session-bar" style="grid-template-columns: 1fr 1fr 1fr auto;">
         <div>
           <label class="label2">Class</label>
           <select name="class_id" id="classSelect" class="input2">
@@ -67,7 +70,11 @@
           <button type="submit" class="btn2 btn2-primary w-100">Apply</button>
         </div>
       </form>
+    </div>
 
+    <div class="card2">
+      <span class="eyebrow">Results</span>
+      <h2 class="panel-title">{{ records|length }} record(s)</h2>
       <div class="table-responsive mt-3">
         <table class="table2">
           <thead>
@@ -92,6 +99,8 @@
                 <button class="btn2 btn2-danger deleteBtn" style="padding:0.35rem 0.7rem; font-size:0.8rem;" data-id="{{ r['id'] }}">Delete</button>
               </td>
             </tr>
+          {% else %}
+            <tr><td colspan="8" class="mono" style="color:var(--ink-soft);">No records in this filter.</td></tr>
           {% endfor %}
           </tbody>
         </table>

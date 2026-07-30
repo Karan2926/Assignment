@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>My Attendance — Digital Attendance</title>
@@ -18,20 +18,28 @@
     </div>
   </nav>
 
-  <div class="page" style="max-width: 800px;">
-    <div class="page-head">
-      <div>
+  <div class="page" style="max-width: 900px;">
+    <div class="dash-hero" style="grid-template-columns: 1.4fr 0.6fr;">
+      <div class="dash-hero-main">
         <span class="eyebrow">My records</span>
-        <h1 style="margin:0; font-size:1.6rem;">{{ student['name'] if student else "Student" }}</h1>
-        <div class="mono" style="color:var(--ink-soft); font-size:0.85rem;">
-          Roll: {{ student['roll'] if student else "-" }} · {{ student['class'] if student else "-" }} {{ student['section'] if student else "" }}
-        </div>
+        <h1>{{ student['name'] if student else "Student" }}</h1>
+        <p class="mono" style="color:rgba(255,255,255,0.8);">
+          Roll: {{ student['roll'] if student else "-" }}
+          · {{ student['class'] if student else "-" }}
+          {{ student['section'] if student else "" }}
+        </p>
+      </div>
+      <div class="dash-stat">
+        <span class="eyebrow">Present</span>
+        <div class="num">{{ records|length }}</div>
+        <div class="mono" style="color:var(--ink-soft); margin-top:0.35rem; font-size:0.75rem;">record(s)</div>
       </div>
     </div>
 
     <div class="card2">
       <span class="eyebrow">Attendance history</span>
-      <h5 style="margin:0 0 1rem;">{{ records|length }} record(s)</h5>
+      <h2 class="panel-title">Your marked sessions</h2>
+      <p class="panel-copy">Class and subject shown when available.</p>
       <div class="table-responsive">
         <table class="table2">
           <thead>
