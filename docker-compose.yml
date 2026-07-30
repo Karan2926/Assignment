@@ -1,0 +1,44 @@
+# College stack: web (gunicorn) + PostgreSQL
+# Copy .env.example → .env and set SECRET_KEY (and optional POSTGRES_PASSWORD).
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: attendance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-attendance}
+      POSTGRES_DB: attendance
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U attendance -d attendance"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      ALLOW_PUBLIC_REGISTER: "0"
+      KEEP_CAPTURE_IMAGES: "0"
+      DATABASE_URL: postgresql://attendance:${POSTGRES_PASSWORD:-attendance}@db:5432/attendance
+      DATASET_DIR: /data/dataset
+      SESSION_COOKIE_SECURE: "0"
+      GUNICORN_WORKERS: "2"
+    volumes:
+      - attendance_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  attendance_data:
+  pgdata:
