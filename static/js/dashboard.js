@@ -47,7 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
         type: "bar",
         data: {
           labels: data.dates,
-          datasets: [{ label: "Attendance", data: data.counts, backgroundColor: "rgba(79,70,229,0.7)" }]
+          datasets: [{ label: "Attendance", data: data.counts, backgroundColor: "rgba(15,118,96,0.75)" }]
         },
         options: { responsive: true, maintainAspectRatio: false }
       });
