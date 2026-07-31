@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Analytics — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/add_student">Add Student</a>
+      <a class="nav-link" href="/mark_attendance">Mark Attendance</a>
+      <a class="nav-link" href="/mark_attendance_classroom">Classroom Photo</a>
+      <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link primary" href="/analytics">Analytics</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
+      <div>
+        <span class="eyebrow">Insights</span>
+        <h1>Attendance Analytics</h1>
+      </div>
+      <a href="/" class="btn2 btn2-outline">Back to dashboard</a>
+    </div>
+
+    <div class="card2 mb-3">
+      <span class="eyebrow">Scope</span>
+      <h2 class="panel-title">Filter by class &amp; subject</h2>
+      <p class="panel-copy">Percentages use days present since each student was added.</p>
+      <form method="GET" class="session-bar" style="grid-template-columns: 1fr 1fr auto;">
+        <div>
+          <label class="label2">Class</label>
+          <select name="class_id" id="classSelect" class="input2">
+            <option value="">All my classes</option>
+            {% for c in classes %}
+            <option value="{{ c['id'] }}" {% if selected_class_id == c['id'] %}selected{% endif %}>
+              {{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label2">Subject</label>
+          <select name="subject_id" id="subjectSelect" class="input2">
+            <option value="">All subjects</option>
+          </select>
+        </div>
+        <div style="align-self:end;">
+          <button type="submit" class="btn2 btn2-primary">Apply filter</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card2">
+      <span class="eyebrow">Class performance</span>
+      <h2 class="panel-title">{% if rows %}{{ rows|length }} student(s){% else %}No students{% endif %}</h2>
+      {% if rows %}
+      <div class="table-responsive mt-3">
+        <table class="table2">
+          <thead>
+            <tr><th>Name</th><th>Roll</th><th>Days Present</th><th>Since</th><th>Attendance %</th></tr>
+          </thead>
+          <tbody>
+          {% for r in rows %}
+            <tr>
+              <td>{{ r.name }}</td>
+              <td class="mono">{{ r.roll }}</td>
+              <td class="mono">{{ r.days_present }}</td>
+              <td class="mono" style="color:var(--ink-soft);">{{ r.total_days }} days</td>
+              <td>
+                <span class="pill {{ 'pill-verified' if r.pct >= 75 else ('pill-unknown' if r.pct >= 50 else 'pill-marked') }}">
+                  {{ r.pct }}%
+                </span>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <p class="mono mt-3" style="color:var(--ink-soft);">No students in the selected scope.</p>
+      {% endif %}
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='js/class_subject.js') }}"></script>
+<script>
+wireClassSubjectFilters('classSelect', 'subjectSelect', {{ selected_subject_id|tojson }});
+</script>
+</body>
+</html>
