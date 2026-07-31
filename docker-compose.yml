@@ -1,0 +1,21 @@
+# Minimal production stack. Set SECRET_KEY before starting.
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      FLASK_ENV: production
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      ALLOW_PUBLIC_REGISTER: "0"
+      KEEP_CAPTURE_IMAGES: "0"
+      DB_PATH: /data/attendance.db
+      DATASET_DIR: /data/dataset
+      SESSION_COOKIE_SECURE: "0"
+      GUNICORN_WORKERS: "2"
+    volumes:
+      - attendance_data:/data
+    restart: unless-stopped
+
+volumes:
+  attendance_data:
