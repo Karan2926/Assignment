@@ -1146,8 +1146,11 @@ def api_student_update(sid):
 
 
 @app.route("/students/<int:sid>", methods=["DELETE"])
-@role_required("admin")
+@role_required("teacher", "admin")
 def delete_student(sid):
+    """Remove a student (and related enrollment/attendance/embeddings/login)."""
+    if not db.teacher_can_manage_student(session["user_id"], session.get("role"), sid):
+        return jsonify({"error": "Not authorized for this student"}), 403
     db.delete_student_cascade(sid)
     folder = os.path.join(DATASET_DIR, str(sid))
     if os.path.isdir(folder):

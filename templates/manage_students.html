@@ -29,7 +29,7 @@
       <div>
         <span class="eyebrow">Student records</span>
         <h1>Manage Students</h1>
-        <p class="panel-copy mt-2">Edit name, roll no., registration no., class and section.</p>
+        <p class="panel-copy mt-2">Edit name, roll no., registration no., class and section. Use Delete to remove duplicates.</p>
       </div>
       <div class="d-flex gap-2 flex-wrap">
         <a href="/add_student" class="btn2 btn2-primary">Add Student</a>
@@ -57,15 +57,24 @@
               <td class="mono">{{ s.reg_no or '—' }}</td>
               <td>{{ s.class_label }}</td>
               <td>
-                <button
-                  type="button"
-                  class="btn2 btn2-outline edit-btn"
-                  data-id="{{ s.id }}"
-                  data-name="{{ s.name }}"
-                  data-roll="{{ s.roll }}"
-                  data-reg="{{ s.reg_no }}"
-                  data-class-id="{{ s.class_id or '' }}"
-                >Edit</button>
+                <div class="d-flex gap-2 flex-wrap">
+                  <button
+                    type="button"
+                    class="btn2 btn2-outline edit-btn"
+                    data-id="{{ s.id }}"
+                    data-name="{{ s.name }}"
+                    data-roll="{{ s.roll }}"
+                    data-reg="{{ s.reg_no }}"
+                    data-class-id="{{ s.class_id or '' }}"
+                  >Edit</button>
+                  <button
+                    type="button"
+                    class="btn2 btn2-danger delete-btn"
+                    data-id="{{ s.id }}"
+                    data-name="{{ s.name }}"
+                    data-roll="{{ s.roll }}"
+                  >Delete</button>
+                </div>
               </td>
             </tr>
             {% else %}
@@ -141,6 +150,29 @@
 
   document.querySelectorAll('.edit-btn').forEach((btn) => {
     btn.addEventListener('click', () => openEdit(btn));
+  });
+
+  document.querySelectorAll('.delete-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const sid = btn.dataset.id;
+      const name = btn.dataset.name || 'this student';
+      const roll = btn.dataset.roll ? ` (Roll ${btn.dataset.roll})` : '';
+      if (!confirm(`Delete ${name}${roll}?\n\nThis removes their attendance records and face data.`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/students/${sid}`, { method: 'DELETE' });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || 'Delete failed');
+          return;
+        }
+        const row = btn.closest('tr');
+        if (row) row.remove();
+      } catch (err) {
+        alert('Network error while deleting');
+      }
+    });
   });
 
   document.getElementById('cancelEdit').addEventListener('click', () => {
