@@ -193,17 +193,25 @@ function buildTable() {
     tr.appendChild(checkTd);
 
     const nameTd = document.createElement("td");
-    nameTd.innerText = face.recognized ? `${face.name} (Roll: ${face.roll || "-"})` : "Unknown";
+    nameTd.innerText = face.recognized
+      ? `${face.name} (Roll: ${face.roll || "-"})`
+      : face.closest_name
+        ? `Unknown (closest: ${face.closest_name})`
+        : "Unknown";
     tr.appendChild(nameTd);
 
     const confTd = document.createElement("td");
-    confTd.innerText = Math.round(face.confidence * 100) + "%";
+    confTd.innerText = Math.round((face.confidence || 0) * 100) + "%";
     tr.appendChild(confTd);
 
     const statusTd = document.createElement("td");
-    if (!face.recognized) statusTd.innerText = "Not matched";
-    else if (face.already_marked) statusTd.innerText = "Already marked today";
-    else statusTd.innerText = "Ready";
+    if (!face.recognized) {
+      statusTd.innerText = "Not matched — use a closer front-facing photo of the enrolled student";
+    } else if (face.already_marked) {
+      statusTd.innerText = "Already marked today";
+    } else {
+      statusTd.innerText = "Ready";
+    }
     tr.appendChild(statusTd);
 
     recognizedTableBody.appendChild(tr);

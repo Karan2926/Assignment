@@ -1006,6 +1006,22 @@ def recognize_classroom():
             return jsonify({"error": "model not trained"}), 200
 
         enrolled = db.student_ids_in_class(class_id)
+        if not enrolled:
+            return (
+                jsonify(
+                    {
+                        "faces": [],
+                        "error": "No students enrolled in this class. Add students to this class and Train Model first.",
+                    }
+                ),
+                200,
+            )
+
+        # Small demo classes: allow slightly lower match score (far faces are weaker)
+        sim_thr = CLASSROOM_SIM_THRESHOLD
+        if len(enrolled) <= 5:
+            sim_thr = min(sim_thr, 0.28)
+
         today = datetime.date.today().isoformat()
         results_list = []
         # Keep best match per student when one person appears multiple times
@@ -1018,9 +1034,17 @@ def recognize_classroom():
                 pred_label, conf = predict_with_model(
                     clf,
                     emb,
-                    allowed_ids=enrolled if enrolled else None,
-                    similarity_threshold=CLASSROOM_SIM_THRESHOLD,
+                    allowed_ids=enrolled,
+                    similarity_threshold=sim_thr,
                     margin=CLASSROOM_MARGIN,
+                )
+                # Always compute closest gallery face for teacher feedback
+                closest_id, closest_conf = predict_with_model(
+                    clf,
+                    emb,
+                    allowed_ids=enrolled,
+                    similarity_threshold=0.0,
+                    margin=0.0,
                 )
 
                 entry = {
@@ -1030,7 +1054,16 @@ def recognize_classroom():
                     "name": "Unknown",
                     "student_id": None,
                     "already_marked": False,
+                    "closest_name": None,
+                    "closest_confidence": float(closest_conf) if closest_id is not None else 0.0,
                 }
+                if closest_id is not None:
+                    crow = c.execute(
+                        "SELECT name, roll FROM students WHERE id=?", (int(closest_id),)
+                    ).fetchone()
+                    if crow:
+                        entry["closest_name"] = crow["name"]
+                        entry["closest_roll"] = crow["roll"]
 
                 if pred_label is not None:
                     sid = int(pred_label)
@@ -1044,6 +1077,7 @@ def recognize_classroom():
                         entry["roll"] = row["roll"]
                         entry["class"] = row["class"]
                         entry["student_id"] = sid
+                        entry["confidence"] = float(conf)
 
                         c.execute(
                             """
@@ -1060,6 +1094,10 @@ def recognize_classroom():
                             best_by_student[sid] = entry
                         continue
 
+                # Not matched — still show closest so "Unknown 18%" is explainable
+                if entry.get("closest_name"):
+                    entry["name"] = f"Unknown (closest: {entry['closest_name']})"
+                    entry["confidence"] = float(entry["closest_confidence"])
                 results_list.append(entry)
 
         # Recognized students once each + unknowns
