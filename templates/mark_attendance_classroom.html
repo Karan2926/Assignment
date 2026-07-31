@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Classroom Photo — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/add_student">Add Student</a>
+      <a class="nav-link" href="/mark_attendance">Mark Attendance</a>
+      <a class="nav-link primary" href="/mark_attendance_classroom">Classroom Photo</a>
+      <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link" href="/analytics">Analytics</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
+      <div>
+        <span class="eyebrow">Batch recognition · Phase 2</span>
+        <h1>Classroom Photo</h1>
+        <p class="panel-copy mt-2">Tip: take 2–3 photos from the front. Students should face the camera. Side faces are harder than live Mark Attendance.</p>
+      </div>
+      <a href="/" class="btn2 btn2-outline">Back to dashboard</a>
+    </div>
+
+    <div class="step-rail">
+      <div class="step-chip active"><span class="n">1</span> Class &amp; subject</div>
+      <div class="step-chip"><span class="n">2</span> Capture / upload</div>
+      <div class="step-chip"><span class="n">3</span> Review &amp; save</div>
+    </div>
+
+    <div class="workspace-split">
+      <div class="card2">
+        <span class="eyebrow">Setup</span>
+        <h2 class="panel-title">Session &amp; photos</h2>
+        <p class="panel-copy">Best for 80+ seats — take a few angles, then analyze once.</p>
+
+        <div class="session-bar">
+          <div>
+            <label class="label2">Class</label>
+            <select id="classSelect" class="input2">
+              <option value="">Select class</option>
+              {% for c in classes %}
+              <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="label2">Subject</label>
+            <select id="subjectSelect" class="input2">
+              <option value="">Select subject</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="d-flex gap-2 mb-3 flex-wrap">
+          <button id="useCameraBtn" class="btn2 btn2-outline" type="button">Use Camera</button>
+        </div>
+
+        <label class="label2">Upload classroom photo(s)</label>
+        <input type="file" id="classroomPhoto" accept="image/*" multiple class="input2 mb-3">
+
+        <div id="cameraSection" style="display:none;" class="mb-3">
+          <div class="scan-stage is-live" style="min-height:240px;">
+            <video id="classroomVideo" autoplay muted playsinline style="min-height:240px;"></video>
+            <div class="scan-corners">
+              <span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+          <div class="d-flex gap-2 mt-2 flex-wrap">
+            <button id="captureBtn" class="btn2 btn2-teal" type="button">Capture Photo</button>
+            <span id="captureCount" class="mono" style="align-self:center; font-size:0.8rem; color:var(--ink-soft);"></span>
+            <button id="closeCameraBtn" class="btn2 btn2-outline" type="button">Close Camera</button>
+          </div>
+        </div>
+
+        <div class="d-grid gap-2">
+          <button id="analyzeBtn" class="btn2 btn2-primary">Analyze Photo</button>
+          <button id="clearBtn" class="btn2 btn2-outline" type="button">Clear Photos</button>
+        </div>
+        <div id="analyzeStatus" class="mono mt-3" style="font-size:0.8rem; color:var(--ink-soft);"></div>
+      </div>
+
+      <div class="card2">
+        <span class="eyebrow">Results</span>
+        <h2 class="panel-title">Preview &amp; review</h2>
+        <p class="panel-copy">Check matches, then confirm who to mark present.</p>
+
+        <div class="text-center">
+          <canvas id="resultCanvas" style="max-width:100%; border-radius:var(--radius); border:1px solid var(--line); background:#fff;"></canvas>
+        </div>
+
+        <div id="summaryCard" class="mt-3" style="display:none;"></div>
+
+        <div id="recognizedTableWrap" class="mt-3" style="display:none;">
+          <span class="eyebrow">Review before saving</span>
+          <h5 style="margin:0.4rem 0 1rem;">Detected students</h5>
+          <div class="table-responsive">
+            <table class="table2">
+              <thead>
+                <tr><th></th><th>Name</th><th>Confidence</th><th>Status</th></tr>
+              </thead>
+              <tbody id="recognizedTableBody"></tbody>
+            </table>
+          </div>
+          <button id="confirmBtn" class="btn2 btn2-teal mt-2">Confirm &amp; Save Attendance</button>
+          <div id="confirmStatus" class="mono mt-2" style="font-size:0.8rem; color:var(--ink-soft);"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='js/camera_mark_classroom.js') }}"></script>
+</body>
+</html>
