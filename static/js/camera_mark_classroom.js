@@ -28,17 +28,40 @@ const captureCount = document.getElementById("captureCount");
 async function loadSubjects(classId) {
   subjectSelect.innerHTML = '<option value="">Select subject</option>';
   if (!classId) return;
-  const res = await fetch(`/api/classes/${classId}/subjects`);
-  const data = await res.json();
-  (data.subjects || []).forEach(s => {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.code ? `${s.name} (${s.code})` : s.name;
-    subjectSelect.appendChild(opt);
-  });
+  try {
+    const res = await fetch(`/api/classes/${classId}/subjects`);
+    const data = await res.json();
+    const subjects = data.subjects || [];
+    if (!res.ok) {
+      analyzeStatus.innerText = data.error || "Could not load subjects.";
+      return;
+    }
+    if (subjects.length === 0) {
+      analyzeStatus.innerText =
+        "No subjects for this class. Admin must create a subject and assign you.";
+      return;
+    }
+    subjects.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = s.code ? `${s.name} (${s.code})` : s.name;
+      subjectSelect.appendChild(opt);
+    });
+    if (subjects.length === 1) {
+      subjectSelect.value = String(subjects[0].id);
+    }
+  } catch (err) {
+    analyzeStatus.innerText = "Network error loading subjects.";
+  }
 }
 
 classSelect?.addEventListener("change", () => loadSubjects(classSelect.value));
+
+// Auto-select single class (keeps Mark Attendance + Classroom Photo consistent)
+if (classSelect && classSelect.options.length === 2) {
+  classSelect.selectedIndex = 1;
+  loadSubjects(classSelect.value);
+}
 
 useCameraBtn.addEventListener("click", async () => {
   try {

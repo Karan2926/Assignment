@@ -1,4 +1,4 @@
-// camera_mark.js — Phase 1: requires class_id + subject_id
+// camera_mark.js — live mark; class + subject required
 const startMarkBtn = document.getElementById("startMarkBtn");
 const stopMarkBtn = document.getElementById("stopMarkBtn");
 const markVideo = document.getElementById("markVideo");
@@ -6,22 +6,56 @@ const markStatus = document.getElementById("markStatus");
 const recognizedList = document.getElementById("recognizedList");
 const classSelect = document.getElementById("classSelect");
 const subjectSelect = document.getElementById("subjectSelect");
+const subjectHint = document.getElementById("subjectHint");
 
 let markStream = null;
 let markInterval = null;
 let recognizedIds = new Set();
 
+function setSubjectHint(text, isError) {
+  if (!subjectHint) return;
+  subjectHint.textContent = text || "";
+  subjectHint.style.color = isError ? "#b91c1c" : "var(--ink-soft)";
+}
+
 async function loadSubjects(classId) {
   subjectSelect.innerHTML = '<option value="">Select subject</option>';
-  if (!classId) return;
-  const res = await fetch(`/api/classes/${classId}/subjects`);
-  const data = await res.json();
-  (data.subjects || []).forEach(s => {
-    const opt = document.createElement("option");
-    opt.value = s.id;
-    opt.textContent = s.code ? `${s.name} (${s.code})` : s.name;
-    subjectSelect.appendChild(opt);
-  });
+  setSubjectHint("");
+  if (!classId) {
+    setSubjectHint("Select a class first to load subjects.");
+    return;
+  }
+  try {
+    const res = await fetch(`/api/classes/${classId}/subjects`);
+    const data = await res.json();
+    if (!res.ok) {
+      setSubjectHint(data.error || "Could not load subjects.", true);
+      return;
+    }
+    const subjects = data.subjects || [];
+    if (subjects.length === 0) {
+      setSubjectHint(
+        "No subjects for this class. Login as admin → create subject → assign this teacher.",
+        true
+      );
+      return;
+    }
+    subjects.forEach((s) => {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = s.code ? `${s.name} (${s.code})` : s.name;
+      subjectSelect.appendChild(opt);
+    });
+    // Auto-pick when only one subject (same as classroom convenience)
+    if (subjects.length === 1) {
+      subjectSelect.value = String(subjects[0].id);
+      setSubjectHint(`Subject: ${subjects[0].name}`);
+    } else {
+      setSubjectHint(`${subjects.length} subjects loaded — pick one.`);
+    }
+  } catch (err) {
+    setSubjectHint("Network error loading subjects.", true);
+  }
 }
 
 classSelect?.addEventListener("change", () => {
@@ -29,6 +63,12 @@ classSelect?.addEventListener("change", () => {
   recognizedIds.clear();
   recognizedList.innerHTML = "";
 });
+
+// If only one class exists, select it and load subjects immediately
+if (classSelect && classSelect.options.length === 2) {
+  classSelect.selectedIndex = 1;
+  loadSubjects(classSelect.value);
+}
 
 startMarkBtn.addEventListener("click", async () => {
   if (!classSelect.value || !subjectSelect.value) {
@@ -40,7 +80,9 @@ startMarkBtn.addEventListener("click", async () => {
   classSelect.disabled = true;
   subjectSelect.disabled = true;
   try {
-    markStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+    markStream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480 },
+    });
     markVideo.srcObject = markStream;
     await markVideo.play();
     markStatus.innerText = "Scanning...";
@@ -56,7 +98,7 @@ startMarkBtn.addEventListener("click", async () => {
 
 stopMarkBtn.addEventListener("click", () => {
   if (markInterval) clearInterval(markInterval);
-  if (markStream) markStream.getTracks().forEach(t => t.stop());
+  if (markStream) markStream.getTracks().forEach((t) => t.stop());
   startMarkBtn.disabled = false;
   stopMarkBtn.disabled = true;
   classSelect.disabled = false;
@@ -70,7 +112,7 @@ async function captureAndRecognize() {
   canvas.height = markVideo.videoHeight || 480;
   const ctx = canvas.getContext("2d");
   ctx.drawImage(markVideo, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.85));
+  const blob = await new Promise((r) => canvas.toBlob(r, "image/jpeg", 0.85));
   const fd = new FormData();
   fd.append("image", blob, "snap.jpg");
   fd.append("class_id", classSelect.value);
@@ -80,11 +122,14 @@ async function captureAndRecognize() {
     const j = await res.json();
     if (j.recognized) {
       const note = j.already_marked ? "already marked" : "saved";
-      markStatus.innerText = `Recognized: ${j.name} (conf ${Math.round(j.confidence * 100)}%) — ${note}`;
+      markStatus.innerText = `Recognized: ${j.name} (conf ${Math.round(
+        j.confidence * 100
+      )}%) — ${note}`;
       if (!recognizedIds.has(j.student_id)) {
         recognizedIds.add(j.student_id);
         const li = document.createElement("li");
-        li.style.cssText = "padding:0.7rem 0.85rem;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,0.75);";
+        li.style.cssText =
+          "padding:0.7rem 0.85rem;border:1px solid var(--line);border-radius:10px;background:rgba(255,255,255,0.75);";
         li.innerText = `${j.name} — ${new Date().toLocaleTimeString()}`;
         recognizedList.prepend(li);
       }
