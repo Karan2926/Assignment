@@ -1020,7 +1020,7 @@ def recognize_classroom():
         # Small demo classes: allow slightly lower match score (far faces are weaker)
         sim_thr = CLASSROOM_SIM_THRESHOLD
         if len(enrolled) <= 5:
-            sim_thr = min(sim_thr, 0.28)
+            sim_thr = min(sim_thr, 0.25)
 
         today = datetime.date.today().isoformat()
         results_list = []
@@ -1094,10 +1094,9 @@ def recognize_classroom():
                             best_by_student[sid] = entry
                         continue
 
-                # Not matched — still show closest so "Unknown 18%" is explainable
-                if entry.get("closest_name"):
-                    entry["name"] = f"Unknown (closest: {entry['closest_name']})"
-                    entry["confidence"] = float(entry["closest_confidence"])
+                # Not matched — keep label simple for teachers
+                entry["name"] = "Unknown"
+                entry["confidence"] = float(entry.get("closest_confidence") or conf or 0.0)
                 results_list.append(entry)
 
         # Recognized students once each + unknowns

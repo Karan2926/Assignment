@@ -195,9 +195,7 @@ function buildTable() {
     const nameTd = document.createElement("td");
     nameTd.innerText = face.recognized
       ? `${face.name} (Roll: ${face.roll || "-"})`
-      : face.closest_name
-        ? `Unknown (closest: ${face.closest_name})`
-        : "Unknown";
+      : "Unknown";
     tr.appendChild(nameTd);
 
     const confTd = document.createElement("td");
@@ -206,7 +204,7 @@ function buildTable() {
 
     const statusTd = document.createElement("td");
     if (!face.recognized) {
-      statusTd.innerText = "Not matched — use a closer front-facing photo of the enrolled student";
+      statusTd.innerText = "Not matched";
     } else if (face.already_marked) {
       statusTd.innerText = "Already marked today";
     } else {
