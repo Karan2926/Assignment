@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Add Student — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link primary" href="/add_student">Add Student</a>
+      <a class="nav-link" href="/mark_attendance">Mark Attendance</a>
+      <a class="nav-link" href="/mark_attendance_classroom">Classroom Photo</a>
+      <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
+      <div>
+        <span class="eyebrow">Registration</span>
+        <h1>Add Student</h1>
+      </div>
+      <a href="/" class="btn2 btn2-outline">Back to dashboard</a>
+    </div>
+
+    <div class="step-rail" aria-label="Enrollment steps">
+      <div class="step-chip active" id="step1"><span class="n">1</span> Save details</div>
+      <div class="step-chip" id="step2"><span class="n">2</span> Capture faces</div>
+      <div class="step-chip" id="step3"><span class="n">3</span> Finish</div>
+    </div>
+
+    <div class="workspace-split">
+      <div class="card2">
+        <span class="eyebrow">Student details</span>
+        <h2 class="panel-title">Who are we enrolling?</h2>
+        <p class="panel-copy">Save info first, then capture guided poses so recognition stays accurate in large classes.</p>
+
+        <form id="studentForm">
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="label2">Full name</label>
+              <input class="input2" name="name" placeholder="e.g. Karan Bhadouriya" required>
+            </div>
+            <div class="col-md-6">
+              <label class="label2">Roll no.</label>
+              <input class="input2" name="roll" placeholder="23">
+            </div>
+            <div class="col-md-6">
+              <label class="label2">Registration no.</label>
+              <input class="input2" name="reg_no" placeholder="REG-0001">
+            </div>
+            <div class="col-12">
+              <label class="label2">Enroll in class</label>
+              <select class="input2" name="class_id" required>
+                <option value="">Select class</option>
+                {% for c in classes %}
+                <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+                {% else %}
+                <option value="" disabled>No classes available — ask admin to assign you</option>
+                {% endfor %}
+              </select>
+              {% if not classes %}
+              <p class="panel-copy mt-2" style="color:#b91c1c;">No class listed. Login as admin and assign this teacher to a class first.</p>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="mt-4 d-grid gap-2">
+            <button id="saveInfoBtn" type="submit" class="btn2 btn2-primary">Save Info</button>
+            <button id="startCaptureBtn" type="button" class="btn2 btn2-teal" disabled>Start Capture (48)</button>
+            <button id="addStudentBtn" type="button" class="btn2 btn2-outline" disabled>Finish &amp; return</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card2">
+        <span class="eyebrow">Face capture</span>
+        <h2 class="panel-title">Camera stage</h2>
+        <p class="panel-copy">Follow on-screen poses. Quality checks run before each frame is kept.</p>
+
+        <div class="scan-stage" id="scanStage">
+          <video id="video" width="640" height="480" autoplay muted playsinline></video>
+          <div class="scan-corners">
+            <span></span><span></span><span></span><span></span>
+          </div>
+          <div class="scan-stage-empty" id="scanEmpty">
+            <div>
+              <strong>Camera ready when you are</strong>
+              <span>Save student info → Start Capture</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="capture-meter">
+          <div id="poseInstruction">Waiting for capture…</div>
+          <div id="captureStatus" class="mono mt-1" style="font-size:0.8rem; color:var(--ink-soft);">Captured 0 / 48</div>
+          <div class="progress2 mt-2">
+            <div id="progressBar" class="progress2-bar" style="width:0%"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='js/camera_add_student.js') }}"></script>
+<script>
+  // Light UI step states tied to existing buttons
+  const step1 = document.getElementById('step1');
+  const step2 = document.getElementById('step2');
+  const step3 = document.getElementById('step3');
+  const stage = document.getElementById('scanStage');
+  const startBtn = document.getElementById('startCaptureBtn');
+  const finishBtn = document.getElementById('addStudentBtn');
+
+  document.getElementById('studentForm').addEventListener('submit', () => {
+    setTimeout(() => {
+      if (!startBtn.disabled) {
+        step1.classList.remove('active');
+        step2.classList.add('active');
+      }
+    }, 400);
+  });
+
+  startBtn.addEventListener('click', () => {
+    stage.classList.add('is-live');
+    step2.classList.add('active');
+  });
+
+  const obs = new MutationObserver(() => {
+    if (!finishBtn.disabled) {
+      step2.classList.remove('active');
+      step3.classList.add('active');
+    }
+  });
+  obs.observe(finishBtn, { attributes: true, attributeFilter: ['disabled'] });
+</script>
+</body>
+</html>
