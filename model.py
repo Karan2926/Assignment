@@ -20,9 +20,11 @@ CACHE_PATH = "embedding_cache.pkl"
 
 # Cosine similarity thresholds (embeddings are L2-normalized).
 LIVE_SIM_THRESHOLD = 0.38
-CLASSROOM_SIM_THRESHOLD = 0.36
+# Classroom photos are harder (smaller/far faces) — slightly looser than live.
+CLASSROOM_SIM_THRESHOLD = 0.32
 # Require winner to beat 2nd place by this margin when both are in-class.
 MARGIN = 0.03
+CLASSROOM_MARGIN = 0.025
 
 _face_apps: dict[tuple[int, int], object] = {}
 
@@ -157,45 +159,102 @@ def _nms_faces(faces, iou_thresh: float = 0.45):
     return kept
 
 
-def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 28):
+def _enhance_classroom_image(img):
+    """Mild contrast boost for dark classrooms (helps detection, keeps colors for InsightFace)."""
+    import cv2
+
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l2 = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge([l2, a, b]), cv2.COLOR_LAB2BGR)
+
+
+def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 18):
     """
     Detect many faces in a wide classroom photo.
-    Uses a larger detector window than live mode so far/small faces survive.
+
+    Live mark works on one large face; classroom photos need multi-scale
+    detection so far/side seats are not missed.
     """
+    import cv2
+
     img = _decode_image(stream_or_bytes)
     if img is None:
         return []
 
-    h, w = img.shape[:2]
-    # Upscale small phone photos so far seats get more pixels
-    scale = 1.0
-    long_edge = max(h, w)
-    if long_edge < 1600:
-        scale = 1600 / long_edge
-        import cv2
-        img = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_CUBIC)
+    orig_h, orig_w = img.shape[:2]
+    working = _enhance_classroom_image(img)
 
-    # Higher det_size finds more small faces in crowded frames
-    faces = get_face_app((960, 960)).get(img)
-    faces = _nms_faces(faces)
+    # Build a few scaled copies so small faces get enough pixels
+    scales = []
+    long_edge = max(orig_h, orig_w)
+    target_edges = [long_edge]
+    if long_edge < 1800:
+        target_edges.append(1800)
+    if long_edge < 2400:
+        target_edges.append(2400)
+    # Always include a moderate upscale pass for phone photos
+    target_edges = sorted(set(int(t) for t in target_edges))
 
-    results = []
-    for f in faces:
-        x1, y1, x2, y2 = f.bbox.astype(int)
-        fw, fh = x2 - x1, y2 - y1
-        if min(fw, fh) < min_face_px * scale:
+    for te in target_edges:
+        if te == long_edge:
+            scales.append((1.0, working))
+        else:
+            s = te / long_edge
+            resized = cv2.resize(
+                working,
+                (int(orig_w * s), int(orig_h * s)),
+                interpolation=cv2.INTER_CUBIC,
+            )
+            scales.append((s, resized))
+
+    # Run detector at more than one window size and merge
+    det_sizes = [(640, 640), (960, 960), (1280, 1280)]
+    raw_faces = []
+    for scale, scaled_img in scales:
+        for det_size in det_sizes:
+            # Skip huge image + huge det_size combos (too slow on laptop CPU)
+            sh, sw = scaled_img.shape[:2]
+            if max(sh, sw) >= 2200 and det_size[0] >= 1280:
+                continue
+            try:
+                faces = get_face_app(det_size).get(scaled_img)
+            except Exception:
+                continue
+            for f in faces:
+                # Copy bbox into original-image coordinates
+                x1, y1, x2, y2 = [float(v) for v in f.bbox]
+                if scale != 1.0:
+                    x1, y1, x2, y2 = x1 / scale, y1 / scale, x2 / scale, y2 / scale
+                raw_faces.append(
+                    {
+                        "bbox": [x1, y1, x2, y2],
+                        "embedding": np.asarray(f.normed_embedding, dtype=np.float32),
+                        "det_score": float(getattr(f, "det_score", 0.0)),
+                    }
+                )
+
+    # NMS in original coordinates
+    raw_faces.sort(key=lambda x: x["det_score"], reverse=True)
+    kept = []
+    for face in raw_faces:
+        bbox = face["bbox"]
+        fw, fh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        if min(fw, fh) < min_face_px:
             continue
-        # Map bbox back to original image coordinates if we upscaled
-        if scale != 1.0:
-            x1, y1, x2, y2 = [int(v / scale) for v in (x1, y1, x2, y2)]
-        results.append(
-            {
-                "bbox": [int(x1), int(y1), int(x2), int(y2)],
-                "embedding": f.normed_embedding,
-                "det_score": float(getattr(f, "det_score", 0.0)),
-            }
-        )
-    return results
+        if any(_iou(bbox, k["bbox"]) >= 0.4 for k in kept):
+            continue
+        kept.append(face)
+
+    return [
+        {
+            "bbox": [int(v) for v in f["bbox"]],
+            "embedding": f["embedding"],
+            "det_score": f["det_score"],
+        }
+        for f in kept
+    ]
 
 
 def load_model_if_exists():
@@ -242,6 +301,7 @@ def predict_with_model(
     allowed_ids: Optional[Iterable[int]] = None,
     similarity_threshold: Optional[float] = None,
     use_centroids: bool = True,
+    margin: Optional[float] = None,
 ):
     """
     Match embedding with cosine similarity against (optionally class-scoped) gallery.
@@ -259,6 +319,7 @@ def predict_with_model(
         if similarity_threshold is not None
         else LIVE_SIM_THRESHOLD
     )
+    need_margin = MARGIN if margin is None else margin
 
     # Prefer per-student centroids when available (faster + stabler for large classes)
     centroids = bundle.get("centroids") if use_centroids else None
@@ -301,7 +362,7 @@ def predict_with_model(
             other_id = int(ids[int(j)])
             if other_id != best_id:
                 second = float(sims[int(j)])
-                if best_sim - second < MARGIN:
+                if best_sim - second < need_margin:
                     return None, best_sim
                 break
 

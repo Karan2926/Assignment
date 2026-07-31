@@ -990,6 +990,7 @@ def recognize_classroom():
 
     try:
         from model import (
+            CLASSROOM_MARGIN,
             CLASSROOM_SIM_THRESHOLD,
             extract_embeddings_for_classroom,
             load_model_if_exists,
@@ -1019,6 +1020,7 @@ def recognize_classroom():
                     emb,
                     allowed_ids=enrolled if enrolled else None,
                     similarity_threshold=CLASSROOM_SIM_THRESHOLD,
+                    margin=CLASSROOM_MARGIN,
                 )
 
                 entry = {
