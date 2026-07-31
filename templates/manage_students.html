@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manage Students — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/add_student">Add Student</a>
+      <a class="nav-link primary" href="/manage_students">Manage Students</a>
+      <a class="nav-link" href="/mark_attendance">Mark Attendance</a>
+      <a class="nav-link" href="/mark_attendance_classroom">Classroom Photo</a>
+      <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1120px;">
+    <div class="page-kicker">
+      <div>
+        <span class="eyebrow">Student records</span>
+        <h1>Manage Students</h1>
+        <p class="panel-copy mt-2">Edit name, roll no., registration no., class and section.</p>
+      </div>
+      <div class="d-flex gap-2 flex-wrap">
+        <a href="/add_student" class="btn2 btn2-primary">Add Student</a>
+        <a href="/" class="btn2 btn2-outline">Dashboard</a>
+      </div>
+    </div>
+
+    <div class="card2 mb-3">
+      <div class="table-responsive">
+        <table class="table2" id="studentsTable">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Roll</th>
+              <th>Reg. no.</th>
+              <th>Class / Section</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for s in students %}
+            <tr data-id="{{ s.id }}">
+              <td>{{ s.name }}</td>
+              <td class="mono">{{ s.roll or '—' }}</td>
+              <td class="mono">{{ s.reg_no or '—' }}</td>
+              <td>{{ s.class_label }}</td>
+              <td>
+                <button
+                  type="button"
+                  class="btn2 btn2-outline edit-btn"
+                  data-id="{{ s.id }}"
+                  data-name="{{ s.name }}"
+                  data-roll="{{ s.roll }}"
+                  data-reg="{{ s.reg_no }}"
+                  data-class-id="{{ s.class_id or '' }}"
+                >Edit</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="5">No students yet. <a href="/add_student">Add a student</a> first.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card2" id="editPanel" style="display:none;">
+      <span class="eyebrow">Edit student</span>
+      <h2 class="panel-title" id="editTitle">Update details</h2>
+      <p class="panel-copy">Changing class/section moves the student into that class for attendance.</p>
+
+      <form id="editForm">
+        <input type="hidden" id="editId" name="id">
+        <div class="row g-3">
+          <div class="col-md-6">
+            <label class="label2">Full name</label>
+            <input class="input2" id="editName" name="name" required>
+          </div>
+          <div class="col-md-3">
+            <label class="label2">Roll no.</label>
+            <input class="input2" id="editRoll" name="roll" placeholder="e.g. 46">
+          </div>
+          <div class="col-md-3">
+            <label class="label2">Registration no.</label>
+            <input class="input2" id="editReg" name="reg_no">
+          </div>
+          <div class="col-12">
+            <label class="label2">Class / Section</label>
+            <select class="input2" id="editClassId" name="class_id" required>
+              <option value="">Select class</option>
+              {% for c in classes %}
+              <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="mt-4 d-flex gap-2 flex-wrap">
+          <button type="submit" class="btn2 btn2-primary">Save changes</button>
+          <button type="button" class="btn2 btn2-outline" id="cancelEdit">Cancel</button>
+        </div>
+        <div id="editStatus" class="mono mt-3" style="font-size:0.8rem; color:var(--ink-soft);"></div>
+      </form>
+    </div>
+  </div>
+
+<script>
+  const editPanel = document.getElementById('editPanel');
+  const editForm = document.getElementById('editForm');
+  const editStatus = document.getElementById('editStatus');
+
+  function openEdit(btn) {
+    document.getElementById('editId').value = btn.dataset.id;
+    document.getElementById('editName').value = btn.dataset.name || '';
+    document.getElementById('editRoll').value = btn.dataset.roll || '';
+    document.getElementById('editReg').value = btn.dataset.reg || '';
+    document.getElementById('editClassId').value = btn.dataset.classId || '';
+    document.getElementById('editTitle').textContent = `Edit: ${btn.dataset.name}`;
+    editStatus.textContent = '';
+    editPanel.style.display = 'block';
+    editPanel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.querySelectorAll('.edit-btn').forEach((btn) => {
+    btn.addEventListener('click', () => openEdit(btn));
+  });
+
+  document.getElementById('cancelEdit').addEventListener('click', () => {
+    editPanel.style.display = 'none';
+  });
+
+  editForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const sid = document.getElementById('editId').value;
+    const payload = {
+      name: document.getElementById('editName').value.trim(),
+      roll: document.getElementById('editRoll').value.trim(),
+      reg_no: document.getElementById('editReg').value.trim(),
+      class_id: document.getElementById('editClassId').value,
+    };
+    editStatus.textContent = 'Saving...';
+    try {
+      const res = await fetch(`/api/students/${sid}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        editStatus.textContent = data.error || 'Update failed';
+        editStatus.style.color = '#b91c1c';
+        return;
+      }
+      editStatus.style.color = 'var(--ink-soft)';
+      editStatus.textContent = 'Saved. Reloading...';
+      window.location.reload();
+    } catch (err) {
+      editStatus.textContent = 'Network error';
+      editStatus.style.color = '#b91c1c';
+    }
+  });
+</script>
+</body>
+</html>

@@ -4,6 +4,7 @@ import shutil
 import threading
 import datetime
 import json
+import sqlite3
 
 from flask import (
     Flask,
@@ -964,6 +965,184 @@ def students_list():
         for r in rows
     ]
     return jsonify({"students": data})
+
+
+@app.route("/manage_students", methods=["GET"])
+@role_required("teacher", "admin")
+def manage_students_page():
+    """List students and edit name / roll / class / section."""
+    classes = db.list_classes_for_user(session["user_id"], session.get("role"))
+    class_ids = db.teacher_class_ids(session["user_id"], session.get("role"))
+    with db.get_conn() as conn:
+        if class_ids is None:
+            rows = conn.execute(
+                """
+                SELECT st.id, st.name, st.roll, st.class, st.section, st.reg_no, st.class_id,
+                       c.name AS class_name, c.section AS class_section
+                FROM students st
+                LEFT JOIN classes c ON c.id = st.class_id
+                ORDER BY st.name
+                """
+            ).fetchall()
+        elif not class_ids:
+            rows = []
+        else:
+            placeholders = ",".join("?" * len(class_ids))
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT st.id, st.name, st.roll, st.class, st.section, st.reg_no, st.class_id,
+                       c.name AS class_name, c.section AS class_section
+                FROM students st
+                LEFT JOIN enrollments e ON e.student_id = st.id
+                LEFT JOIN classes c ON c.id = st.class_id
+                WHERE st.class_id IN ({placeholders}) OR e.class_id IN ({placeholders})
+                ORDER BY st.name
+                """,
+                tuple(class_ids) + tuple(class_ids),
+            ).fetchall()
+
+    students = []
+    for r in rows:
+        label = ""
+        if r["class_name"]:
+            label = r["class_name"]
+            if r["class_section"]:
+                label += f" — Sec {r['class_section']}"
+        elif r["class"]:
+            label = r["class"]
+            if r["section"]:
+                label += f" — Sec {r['section']}"
+        students.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "roll": r["roll"] or "",
+                "reg_no": r["reg_no"] or "",
+                "class_id": r["class_id"],
+                "class_label": label or "—",
+                "class": r["class"] or "",
+                "section": r["section"] or "",
+            }
+        )
+
+    return render_template(
+        "manage_students.html",
+        students=students,
+        classes=classes,
+        role=session.get("role"),
+    )
+
+
+@app.route("/api/students/<int:sid>", methods=["GET", "PUT", "PATCH"])
+@role_required("teacher", "admin")
+def api_student_update(sid):
+    if not db.teacher_can_manage_student(session["user_id"], session.get("role"), sid):
+        return jsonify({"error": "Not authorized for this student"}), 403
+
+    if request.method == "GET":
+        with db.get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, name, roll, class, section, reg_no, class_id, created_at
+                FROM students WHERE id=?
+                """,
+                (sid,),
+            ).fetchone()
+        if not row:
+            return jsonify({"error": "student not found"}), 404
+        return jsonify(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "roll": row["roll"] or "",
+                "class": row["class"] or "",
+                "section": row["section"] or "",
+                "reg_no": row["reg_no"] or "",
+                "class_id": row["class_id"],
+            }
+        )
+
+    data = request.get_json(silent=True) or {}
+    name = str(data.get("name", "")).strip()
+    roll = str(data.get("roll", "")).strip()
+    reg_no = str(data.get("reg_no", "")).strip()
+    class_id_raw = data.get("class_id", None)
+
+    if not name:
+        return jsonify({"error": "Name is required"}), 400
+
+    class_id = None
+    cls_name = ""
+    section = ""
+    if class_id_raw is not None and str(class_id_raw).strip() != "":
+        try:
+            class_id = int(class_id_raw)
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid class_id"}), 400
+        allowed = db.list_classes_for_user(session["user_id"], session.get("role"))
+        if class_id not in {c["id"] for c in allowed}:
+            return jsonify({"error": "Not authorized for this class"}), 403
+        with db.get_conn() as conn:
+            crow = conn.execute(
+                "SELECT name, section FROM classes WHERE id=?", (class_id,)
+            ).fetchone()
+            if not crow:
+                return jsonify({"error": "Class not found"}), 404
+            cls_name = crow["name"]
+            section = crow["section"] or ""
+
+    roll_db = roll or None
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        with db.get_conn() as conn:
+            existing = conn.execute("SELECT id, class_id FROM students WHERE id=?", (sid,)).fetchone()
+            if not existing:
+                return jsonify({"error": "student not found"}), 404
+            old_class_id = existing["class_id"]
+
+            if class_id is not None:
+                conn.execute(
+                    """
+                    UPDATE students
+                    SET name=?, roll=?, reg_no=?, class_id=?, class=?, section=?
+                    WHERE id=?
+                    """,
+                    (name, roll_db, reg_no, class_id, cls_name, section, sid),
+                )
+                # Move enrollment to the new class
+                if old_class_id and int(old_class_id) != int(class_id):
+                    conn.execute(
+                        "DELETE FROM enrollments WHERE student_id=? AND class_id=?",
+                        (sid, old_class_id),
+                    )
+                conn.execute(
+                    "INSERT OR IGNORE INTO enrollments (student_id, class_id, created_at) VALUES (?, ?, ?)",
+                    (sid, class_id, now),
+                )
+            else:
+                conn.execute(
+                    """
+                    UPDATE students
+                    SET name=?, roll=?, reg_no=?
+                    WHERE id=?
+                    """,
+                    (name, roll_db, reg_no, sid),
+                )
+    except sqlite3.IntegrityError:
+        return jsonify({"error": f"Roll number '{roll}' already exists. Use a unique roll."}), 409
+
+    return jsonify(
+        {
+            "updated": True,
+            "student_id": sid,
+            "name": name,
+            "roll": roll,
+            "reg_no": reg_no,
+            "class_id": class_id,
+            "class": cls_name,
+            "section": section,
+        }
+    )
 
 
 @app.route("/students/<int:sid>", methods=["DELETE"])
