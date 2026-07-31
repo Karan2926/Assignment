@@ -1,0 +1,13 @@
+/* Legacy compatibility — theme.css owns the look now */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+#attendanceChart {
+  max-height: 320px;
+}
+
+.text-muted {
+  color: var(--ink-soft) !important;
+}
