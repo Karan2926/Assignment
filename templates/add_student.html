@@ -64,8 +64,13 @@
                 <option value="">Select class</option>
                 {% for c in classes %}
                 <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+                {% else %}
+                <option value="" disabled>No classes available — ask admin to assign you</option>
                 {% endfor %}
               </select>
+              {% if not classes %}
+              <p class="panel-copy mt-2" style="color:#b91c1c;">No class listed. Login as admin and assign this teacher to a class first.</p>
+              {% endif %}
             </div>
           </div>
 

@@ -533,41 +533,60 @@ def add_student():
     class_id_raw = data.get("class_id", "").strip()
 
     if not name:
-        return jsonify({"error": "name required"}), 400
+        return jsonify({"error": "Name is required"}), 400
+    if not class_id_raw:
+        return jsonify({"error": "Select a class before saving"}), 400
 
-    class_id = None
-    if class_id_raw:
-        try:
-            class_id = int(class_id_raw)
-        except ValueError:
-            return jsonify({"error": "invalid class_id"}), 400
-        allowed = db.list_classes_for_user(session["user_id"], session.get("role"))
-        if class_id not in {c["id"] for c in allowed}:
-            return jsonify({"error": "Not authorized for this class"}), 403
-        with db.get_conn() as conn:
-            crow = conn.execute(
-                "SELECT name, section FROM classes WHERE id=?", (class_id,)
-            ).fetchone()
-            if crow:
-                cls = crow["name"]
-                sec = crow["section"] or sec
+    try:
+        class_id = int(class_id_raw)
+    except ValueError:
+        return jsonify({"error": "invalid class_id"}), 400
 
-    now = datetime.datetime.utcnow().isoformat()
+    allowed = db.list_classes_for_user(session["user_id"], session.get("role"))
+    if class_id not in {c["id"] for c in allowed}:
+        return jsonify(
+            {
+                "error": "Not authorized for this class. Admin must assign the teacher to this class first."
+            }
+        ), 403
+
     with db.get_conn() as conn:
-        c = conn.cursor()
-        c.execute(
-            """
-            INSERT INTO students (name, roll, class, section, reg_no, class_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (name, roll, cls, sec, reg_no, class_id, now),
-        )
-        sid = c.lastrowid
-        if class_id:
+        crow = conn.execute(
+            "SELECT name, section FROM classes WHERE id=?", (class_id,)
+        ).fetchone()
+        if not crow:
+            return jsonify({"error": "Class not found"}), 404
+        cls = crow["name"]
+        sec = crow["section"] or sec
+
+    # Store blank roll as NULL so unique-roll index does not block empty values
+    roll_db = roll or None
+    now = datetime.datetime.utcnow().isoformat()
+    try:
+        with db.get_conn() as conn:
+            c = conn.cursor()
+            c.execute(
+                """
+                INSERT INTO students (name, roll, class, section, reg_no, class_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (name, roll_db, cls, sec, reg_no, class_id, now),
+            )
+            sid = c.lastrowid
             c.execute(
                 "INSERT OR IGNORE INTO enrollments (student_id, class_id, created_at) VALUES (?, ?, ?)",
                 (sid, class_id, now),
             )
+    except db.IntegrityError:
+        return jsonify(
+            {
+                "error": f"Roll number '{roll}' already exists. Use a unique roll number."
+            }
+        ), 409
+
+    if not sid:
+        return jsonify({"error": "Failed to create student"}), 500
+
     os.makedirs(os.path.join(DATASET_DIR, str(sid)), exist_ok=True)
     return jsonify({"student_id": sid})
 
