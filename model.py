@@ -19,12 +19,11 @@ MODEL_PATH = "model.pkl"
 CACHE_PATH = "embedding_cache.pkl"
 
 # Cosine similarity thresholds (embeddings are L2-normalized).
+# buffalo_l recognition is ArcFace-family; far seats need strong detection/crops.
 LIVE_SIM_THRESHOLD = 0.38
-# Classroom photos are harder (smaller/far faces) — slightly looser than live.
-CLASSROOM_SIM_THRESHOLD = 0.32
-# Require winner to beat 2nd place by this margin when both are in-class.
+CLASSROOM_SIM_THRESHOLD = 0.28
 MARGIN = 0.03
-CLASSROOM_MARGIN = 0.025
+CLASSROOM_MARGIN = 0.02
 
 _face_apps: dict[tuple[int, int], object] = {}
 
@@ -170,12 +169,107 @@ def _enhance_classroom_image(img):
     return cv2.cvtColor(cv2.merge([l2, a, b]), cv2.COLOR_LAB2BGR)
 
 
-def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 18):
+def _clip_bbox(x1, y1, x2, y2, w, h):
+    x1 = max(0, min(int(x1), w - 1))
+    y1 = max(0, min(int(y1), h - 1))
+    x2 = max(0, min(int(x2), w))
+    y2 = max(0, min(int(y2), h))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    return x1, y1, x2, y2
+
+
+def _reembed_upscaled_crop(img, bbox, min_face_side: int = 160):
+    """
+    Re-run ArcFace on an upscaled face crop.
+    Far seats are tiny; embedding quality jumps when the face is enlarged first.
+    """
+    import cv2
+
+    h, w = img.shape[:2]
+    x1, y1, x2, y2 = bbox
+    fw, fh = max(1.0, x2 - x1), max(1.0, y2 - y1)
+    pad_x, pad_y = fw * 0.45, fh * 0.45
+    clipped = _clip_bbox(x1 - pad_x, y1 - pad_y, x2 + pad_x, y2 + pad_y, w, h)
+    if not clipped:
+        return None
+    cx1, cy1, cx2, cy2 = clipped
+    crop = img[cy1:cy2, cx1:cx2]
+    if crop.size == 0:
+        return None
+
+    ch, cw = crop.shape[:2]
+    side = max(ch, cw)
+    if side < min_face_side:
+        scale = min_face_side / side
+        crop = cv2.resize(
+            crop,
+            (max(1, int(cw * scale)), max(1, int(ch * scale))),
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+    try:
+        faces = get_face_app((640, 640)).get(crop)
+    except Exception:
+        return None
+    if not faces:
+        return None
+    faces = sorted(
+        faces,
+        key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
+        reverse=True,
+    )
+    return np.asarray(faces[0].normed_embedding, dtype=np.float32)
+
+
+def _iter_classroom_tiles(img, grid_rows: int = 2, grid_cols: int = 3, overlap: float = 0.25):
+    """Yield (x0, y0, tile_img_upscaled, scale_to_tile_pixels)."""
+    import cv2
+
+    h, w = img.shape[:2]
+    tile_h = h / grid_rows
+    tile_w = w / grid_cols
+    step_y = tile_h * (1.0 - overlap)
+    step_x = tile_w * (1.0 - overlap)
+
+    y = 0.0
+    while y < h:
+        x = 0.0
+        y2 = min(h, int(y + tile_h * (1.0 + overlap)))
+        y1 = int(y)
+        if y2 - y1 < 40:
+            break
+        while x < w:
+            x2 = min(w, int(x + tile_w * (1.0 + overlap)))
+            x1 = int(x)
+            if x2 - x1 < 40:
+                break
+            tile = img[y1:y2, x1:x2]
+            th, tw = tile.shape[:2]
+            target = 1000
+            long_edge = max(th, tw)
+            scale = target / long_edge if long_edge < target else 1.0
+            if scale != 1.0:
+                tile = cv2.resize(
+                    tile,
+                    (int(tw * scale), int(th * scale)),
+                    interpolation=cv2.INTER_CUBIC,
+                )
+            yield x1, y1, tile, scale
+            if x2 >= w:
+                break
+            x += step_x
+        if y2 >= h:
+            break
+        y += step_y
+
+
+def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 14):
     """
     Detect many faces in a wide classroom photo.
 
-    Live mark works on one large face; classroom photos need multi-scale
-    detection so far/side seats are not missed.
+    Full-frame multi-scale + overlapping zoom tiles + upscaled re-embed.
+    buffalo_l recognition is ArcFace-family; far seats need larger face crops.
     """
     import cv2
 
@@ -185,57 +279,53 @@ def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 18):
 
     orig_h, orig_w = img.shape[:2]
     working = _enhance_classroom_image(img)
+    raw_faces = []
 
-    # Build a few scaled copies so small faces get enough pixels
-    scales = []
+    def _add_faces(faces, ox=0.0, oy=0.0, scale=1.0):
+        for f in faces:
+            x1, y1, x2, y2 = [float(v) for v in f.bbox]
+            if scale != 1.0:
+                x1, y1, x2, y2 = x1 / scale, y1 / scale, x2 / scale, y2 / scale
+            x1, y1, x2, y2 = x1 + ox, y1 + oy, x2 + ox, y2 + oy
+            raw_faces.append(
+                {
+                    "bbox": [x1, y1, x2, y2],
+                    "embedding": np.asarray(f.normed_embedding, dtype=np.float32),
+                    "det_score": float(getattr(f, "det_score", 0.0)),
+                }
+            )
+
     long_edge = max(orig_h, orig_w)
-    target_edges = [long_edge]
-    if long_edge < 1800:
-        target_edges.append(1800)
-    if long_edge < 2400:
-        target_edges.append(2400)
-    # Always include a moderate upscale pass for phone photos
-    target_edges = sorted(set(int(t) for t in target_edges))
-
-    for te in target_edges:
+    full_targets = sorted({long_edge, max(long_edge, 2000), max(long_edge, 2800)})
+    for te in full_targets:
         if te == long_edge:
-            scales.append((1.0, working))
+            scaled, scale = working, 1.0
         else:
-            s = te / long_edge
-            resized = cv2.resize(
+            scale = te / long_edge
+            scaled = cv2.resize(
                 working,
-                (int(orig_w * s), int(orig_h * s)),
+                (int(orig_w * scale), int(orig_h * scale)),
                 interpolation=cv2.INTER_CUBIC,
             )
-            scales.append((s, resized))
-
-    # Run detector at more than one window size and merge
-    det_sizes = [(640, 640), (960, 960), (1280, 1280)]
-    raw_faces = []
-    for scale, scaled_img in scales:
-        for det_size in det_sizes:
-            # Skip huge image + huge det_size combos (too slow on laptop CPU)
-            sh, sw = scaled_img.shape[:2]
-            if max(sh, sw) >= 2200 and det_size[0] >= 1280:
+        for det_size in ((960, 960), (1280, 1280)):
+            if max(scaled.shape[:2]) >= 2600 and det_size[0] >= 1280:
                 continue
             try:
-                faces = get_face_app(det_size).get(scaled_img)
+                _add_faces(get_face_app(det_size).get(scaled), scale=scale)
             except Exception:
                 continue
-            for f in faces:
-                # Copy bbox into original-image coordinates
-                x1, y1, x2, y2 = [float(v) for v in f.bbox]
-                if scale != 1.0:
-                    x1, y1, x2, y2 = x1 / scale, y1 / scale, x2 / scale, y2 / scale
-                raw_faces.append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "embedding": np.asarray(f.normed_embedding, dtype=np.float32),
-                        "det_score": float(getattr(f, "det_score", 0.0)),
-                    }
-                )
 
-    # NMS in original coordinates
+    for x0, y0, tile, tile_scale in _iter_classroom_tiles(working):
+        try:
+            _add_faces(
+                get_face_app((640, 640)).get(tile),
+                ox=float(x0),
+                oy=float(y0),
+                scale=tile_scale,
+            )
+        except Exception:
+            continue
+
     raw_faces.sort(key=lambda x: x["det_score"], reverse=True)
     kept = []
     for face in raw_faces:
@@ -247,14 +337,24 @@ def extract_embeddings_for_classroom(stream_or_bytes, min_face_px: int = 18):
             continue
         kept.append(face)
 
-    return [
-        {
-            "bbox": [int(v) for v in f["bbox"]],
-            "embedding": f["embedding"],
-            "det_score": f["det_score"],
-        }
-        for f in kept
-    ]
+    results = []
+    for f in kept:
+        bbox = f["bbox"]
+        fw, fh = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        emb = f["embedding"]
+        if min(fw, fh) < 90:
+            better = _reembed_upscaled_crop(working, bbox)
+            if better is not None:
+                emb = better
+        results.append(
+            {
+                "bbox": [int(v) for v in bbox],
+                "embedding": emb,
+                "det_score": f["det_score"],
+            }
+        )
+    return results
+
 
 
 def load_model_if_exists():
