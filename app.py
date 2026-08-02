@@ -1174,11 +1174,14 @@ def recognize_classroom():
         from model import (
             CLASSROOM_MARGIN,
             CLASSROOM_SIM_THRESHOLD,
-            CLASSROOM_STRONG_THRESHOLD,
             extract_embeddings_for_classroom,
             load_model_if_exists,
             predict_with_model,
         )
+        try:
+            from model import CLASSROOM_STRONG_THRESHOLD
+        except ImportError:
+            CLASSROOM_STRONG_THRESHOLD = 0.32
 
         faces = extract_embeddings_for_classroom(img_file.stream)
         if not faces:

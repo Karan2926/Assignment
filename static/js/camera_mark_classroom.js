@@ -177,20 +177,24 @@ function drawPreview() {
   ctx.fillText("Preview (first photo) — results merged below", 18, 30);
 }
 
-/** Strong enough to auto-check; weaker matches need teacher review first. */
-const STRONG_MATCH = 0.40;
+/** Label strength for teachers (does not hide matches). */
+const STRONG_MATCH = 0.32;
 
 function reviewInfo(face) {
   if (!face.recognized) {
-    return { label: "Unknown — skip", autoCheck: false, needsReview: true };
+    return { label: "Unknown — skip", needsReview: true };
   }
   if (face.already_marked) {
-    return { label: "Already marked", autoCheck: false, needsReview: false };
+    return { label: "Already marked", needsReview: false };
   }
-  if (face.needs_review === true || (face.confidence || 0) < STRONG_MATCH) {
-    return { label: "Needs review", autoCheck: false, needsReview: true };
+  // Prefer server flag; fall back to local threshold
+  const weak =
+    face.needs_review === true ||
+    (typeof face.needs_review === "undefined" && (face.confidence || 0) < STRONG_MATCH);
+  if (weak) {
+    return { label: "Needs review", needsReview: true };
   }
-  return { label: "Auto-OK", autoCheck: true, needsReview: false };
+  return { label: "Auto-OK", needsReview: false };
 }
 
 function buildTable() {
@@ -209,11 +213,12 @@ function buildTable() {
     }
 
     const checkTd = document.createElement("td");
-    if (face.recognized && !face.already_marked) {
+    if (face.recognized) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      // Only auto-check strong matches — weak ones need teacher confirmation
-      checkbox.checked = review.autoCheck;
+      // Always show recognized students as selected (unless already marked)
+      // Review column warns about weak matches; teacher can uncheck if wrong
+      checkbox.checked = !face.already_marked;
       checkbox.dataset.studentId = face.student_id;
       checkTd.appendChild(checkbox);
     }
@@ -240,10 +245,10 @@ function buildTable() {
       statusTd.innerText = "Not matched";
     } else if (face.already_marked) {
       statusTd.innerText = "Already marked today";
-    } else if (review.autoCheck) {
-      statusTd.innerText = "Ready to save";
+    } else if (review.needsReview) {
+      statusTd.innerText = "Selected — double-check name";
     } else {
-      statusTd.innerText = "Confirm checkbox if correct";
+      statusTd.innerText = "Ready to save";
     }
     tr.appendChild(statusTd);
 
@@ -251,7 +256,7 @@ function buildTable() {
   });
 
   if (reviewCount > 0) {
-    analyzeStatus.innerText += ` ${reviewCount} weak match(es) need your review before saving.`;
+    analyzeStatus.innerText += ` ${reviewCount} weaker match(es) highlighted — uncheck any wrong name before saving.`;
   }
 }
 
