@@ -4,7 +4,6 @@ import shutil
 import threading
 import datetime
 import json
-import sqlite3
 
 from flask import (
     Flask,
@@ -46,6 +45,27 @@ app.config["SESSION_COOKIE_SAMESITE"] = config.SESSION_COOKIE_SAMESITE
 app.config["SESSION_COOKIE_SECURE"] = config.SESSION_COOKIE_SECURE
 
 db.init_db()
+
+# Permanent Postgres: fail early with a clear message if DB is wrong/unreachable
+try:
+    backend = db.backend_name() if hasattr(db, "backend_name") else (
+        "postgresql" if config.DATABASE_URL else "sqlite"
+    )
+except Exception:
+    backend = "postgresql" if config.DATABASE_URL else "sqlite"
+
+if config.DATABASE_URL and not str(config.DATABASE_URL).lower().startswith("postgres"):
+    raise SystemExit(
+        "DATABASE_URL must be a PostgreSQL URL. "
+        "Example: postgresql://attendance:attendance@127.0.0.1:5433/attendance"
+    )
+
+print(f"[attendance] database backend = {backend}")
+if backend == "sqlite":
+    print(
+        "[attendance] WARNING: SQLite mode (USE_SQLITE=1). "
+        "Normal college use should be PostgreSQL via .env DATABASE_URL."
+    )
 
 limiter = None
 if Limiter and get_remote_address:
@@ -1128,7 +1148,7 @@ def api_student_update(sid):
                     """,
                     (name, roll_db, reg_no, sid),
                 )
-    except sqlite3.IntegrityError:
+    except db.IntegrityError:
         return jsonify({"error": f"Roll number '{roll}' already exists. Use a unique roll."}), 409
 
     return jsonify(
