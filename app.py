@@ -1174,6 +1174,7 @@ def recognize_classroom():
         from model import (
             CLASSROOM_MARGIN,
             CLASSROOM_SIM_THRESHOLD,
+            CLASSROOM_STRONG_THRESHOLD,
             extract_embeddings_for_classroom,
             load_model_if_exists,
             predict_with_model,
@@ -1236,6 +1237,7 @@ def recognize_classroom():
                     "name": "Unknown",
                     "student_id": None,
                     "already_marked": False,
+                    "needs_review": True,
                     "closest_name": None,
                     "closest_confidence": float(closest_conf) if closest_id is not None else 0.0,
                 }
@@ -1260,6 +1262,8 @@ def recognize_classroom():
                         entry["class"] = row["class"]
                         entry["student_id"] = sid
                         entry["confidence"] = float(conf)
+                        # Weak matches need teacher confirmation (UI hides raw %)
+                        entry["needs_review"] = float(conf) < CLASSROOM_STRONG_THRESHOLD
 
                         c.execute(
                             """
@@ -1278,6 +1282,7 @@ def recognize_classroom():
 
                 # Not matched — keep label simple for teachers
                 entry["name"] = "Unknown"
+                entry["needs_review"] = True
                 entry["confidence"] = float(entry.get("closest_confidence") or conf or 0.0)
                 results_list.append(entry)
 

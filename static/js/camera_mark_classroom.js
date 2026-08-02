@@ -177,16 +177,43 @@ function drawPreview() {
   ctx.fillText("Preview (first photo) — results merged below", 18, 30);
 }
 
+/** Strong enough to auto-check; weaker matches need teacher review first. */
+const STRONG_MATCH = 0.40;
+
+function reviewInfo(face) {
+  if (!face.recognized) {
+    return { label: "Unknown — skip", autoCheck: false, needsReview: true };
+  }
+  if (face.already_marked) {
+    return { label: "Already marked", autoCheck: false, needsReview: false };
+  }
+  if (face.needs_review === true || (face.confidence || 0) < STRONG_MATCH) {
+    return { label: "Needs review", autoCheck: false, needsReview: true };
+  }
+  return { label: "Auto-OK", autoCheck: true, needsReview: false };
+}
+
 function buildTable() {
   recognizedTableBody.innerHTML = "";
+  let reviewCount = 0;
+
   detectedFaces.forEach((face) => {
+    const review = reviewInfo(face);
+    if (review.needsReview && face.recognized && !face.already_marked) {
+      reviewCount += 1;
+    }
+
     const tr = document.createElement("tr");
+    if (review.label === "Needs review") {
+      tr.style.background = "rgba(245, 158, 11, 0.08)";
+    }
 
     const checkTd = document.createElement("td");
-    if (face.recognized) {
+    if (face.recognized && !face.already_marked) {
       const checkbox = document.createElement("input");
       checkbox.type = "checkbox";
-      checkbox.checked = !face.already_marked;
+      // Only auto-check strong matches — weak ones need teacher confirmation
+      checkbox.checked = review.autoCheck;
       checkbox.dataset.studentId = face.student_id;
       checkTd.appendChild(checkbox);
     }
@@ -198,22 +225,34 @@ function buildTable() {
       : "Unknown";
     tr.appendChild(nameTd);
 
-    const confTd = document.createElement("td");
-    confTd.innerText = Math.round((face.confidence || 0) * 100) + "%";
-    tr.appendChild(confTd);
+    const reviewTd = document.createElement("td");
+    reviewTd.innerText = review.label;
+    if (review.label === "Needs review") {
+      reviewTd.style.fontWeight = "600";
+      reviewTd.style.color = "var(--amber, #B45309)";
+    } else if (review.label === "Auto-OK") {
+      reviewTd.style.color = "var(--teal, #0F766E)";
+    }
+    tr.appendChild(reviewTd);
 
     const statusTd = document.createElement("td");
     if (!face.recognized) {
       statusTd.innerText = "Not matched";
     } else if (face.already_marked) {
       statusTd.innerText = "Already marked today";
+    } else if (review.autoCheck) {
+      statusTd.innerText = "Ready to save";
     } else {
-      statusTd.innerText = "Ready";
+      statusTd.innerText = "Confirm checkbox if correct";
     }
     tr.appendChild(statusTd);
 
     recognizedTableBody.appendChild(tr);
   });
+
+  if (reviewCount > 0) {
+    analyzeStatus.innerText += ` ${reviewCount} weak match(es) need your review before saving.`;
+  }
 }
 
 confirmBtn.addEventListener("click", async () => {

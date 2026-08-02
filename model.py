@@ -22,6 +22,8 @@ CACHE_PATH = "embedding_cache.pkl"
 # buffalo_l recognition is ArcFace-family; far seats need strong detection/crops.
 LIVE_SIM_THRESHOLD = 0.38
 CLASSROOM_SIM_THRESHOLD = 0.28
+# Above match threshold but below this → teacher must confirm (UI "Needs review")
+CLASSROOM_STRONG_THRESHOLD = 0.40
 MARGIN = 0.03
 CLASSROOM_MARGIN = 0.02
 
