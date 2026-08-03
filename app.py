@@ -1462,6 +1462,35 @@ def analytics():
     )
 
 
+@app.route("/copilot", methods=["GET"])
+@role_required("teacher", "admin")
+def copilot_page():
+    return render_template(
+        "copilot.html",
+        role=session.get("role"),
+        username=session.get("username"),
+    )
+
+
+@app.route("/api/copilot", methods=["POST"])
+@role_required("teacher", "admin")
+@_limit(config.RATELIMIT_DEFAULT)
+def api_copilot():
+    """Rules-based AI Attendance Copilot — answers from live DB (no LLM)."""
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or data.get("message") or "").strip()
+    if len(query) > 500:
+        return jsonify({"error": "Query too long"}), 400
+    try:
+        import copilot as copilot_mod
+
+        result = copilot_mod.ask(session["user_id"], session.get("role"), query)
+        return jsonify(result), 200
+    except Exception:
+        app.logger.exception("copilot error")
+        return jsonify({"error": "Copilot failed", "ok": False, "answer": "Something went wrong."}), 500
+
+
 @app.route("/check_face", methods=["POST"])
 @role_required("teacher", "admin")
 def check_face():
