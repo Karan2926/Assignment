@@ -114,6 +114,18 @@ def _decode_image(stream_or_bytes):
 
 
 def extract_embedding_for_image(stream_or_bytes):
+    """Return largest-face embedding, or None."""
+    face = extract_face_for_image(stream_or_bytes)
+    if face is None:
+        return None
+    return face["embedding"]
+
+
+def extract_face_for_image(stream_or_bytes):
+    """
+    Detect the largest face and return embedding + bbox.
+    bbox is [x1, y1, x2, y2] in original image pixels.
+    """
     img = _decode_image(stream_or_bytes)
     if img is None:
         return None
@@ -122,14 +134,19 @@ def extract_embedding_for_image(stream_or_bytes):
     if len(faces) == 0:
         return None
 
-    # Largest face for live / single-person capture
     faces = sorted(
         faces,
         key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]),
         reverse=True,
     )
-    return faces[0].normed_embedding
-
+    f = faces[0]
+    bbox = [float(x) for x in f.bbox.tolist()] if hasattr(f.bbox, "tolist") else [float(x) for x in f.bbox]
+    return {
+        "embedding": f.normed_embedding,
+        "bbox": bbox,
+        "image_width": int(img.shape[1]),
+        "image_height": int(img.shape[0]),
+    }
 
 def _iou(a, b) -> float:
     ax1, ay1, ax2, ay2 = a

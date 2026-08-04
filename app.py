@@ -782,18 +782,31 @@ def recognize_face():
     img_file = request.files["image"]
     try:
         from model import (
-            extract_embedding_for_image,
+            extract_face_for_image,
             load_model_if_exists,
             predict_with_model,
         )
 
-        emb = extract_embedding_for_image(img_file.stream)
-        if emb is None:
+        face = extract_face_for_image(img_file.stream)
+        if face is None:
             return jsonify({"recognized": False, "error": "no face detected"}), 200
+
+        emb = face["embedding"]
+        bbox = face.get("bbox")
+        frame_w = face.get("image_width")
+        frame_h = face.get("image_height")
 
         clf = load_model_if_exists()
         if clf is None:
-            return jsonify({"recognized": False, "error": "model not trained"}), 200
+            return jsonify(
+                {
+                    "recognized": False,
+                    "error": "model not trained",
+                    "bbox": bbox,
+                    "image_width": frame_w,
+                    "image_height": frame_h,
+                }
+            ), 200
 
         # Phase 2: match only against students enrolled in this class
         enrolled = db.student_ids_in_class(class_id)
@@ -803,7 +816,16 @@ def recognize_face():
             allowed_ids=enrolled if enrolled else None,
         )
         if pred_label is None:
-            return jsonify({"recognized": False, "confidence": float(conf)}), 200
+            return jsonify(
+                {
+                    "recognized": False,
+                    "confidence": float(conf),
+                    "bbox": bbox,
+                    "image_width": frame_w,
+                    "image_height": frame_h,
+                    "label": "Unknown",
+                }
+            ), 200
 
         sid = int(pred_label)
 
@@ -826,6 +848,10 @@ def recognize_face():
                 "confidence": float(conf),
                 "saved": saved > 0,
                 "already_marked": saved == 0,
+                "bbox": bbox,
+                "image_width": frame_w,
+                "image_height": frame_h,
+                "label": name,
             }
         ), 200
     except Exception as e:

@@ -14,6 +14,7 @@ const subjectSelect = document.getElementById("subjectSelect");
 let capturedBlobs = [];
 let cameraStream = null;
 let detectedFaces = [];
+let previewFaces = []; // faces from first photo (bboxes match preview canvas)
 let previewImage = null;
 let activeClassId = null;
 let activeSubjectId = null;
@@ -75,6 +76,7 @@ clearBtn.addEventListener("click", () => {
   classroomPhotoInput.value = "";
   captureCount.innerText = "";
   detectedFaces = [];
+  previewFaces = [];
   previewImage = null;
   activeClassId = null;
   activeSubjectId = null;
@@ -123,8 +125,10 @@ analyzeBtn.addEventListener("click", async () => {
   const mergedByStudent = new Map();
   const unknownFaces = [];
   let anyError = null;
+  previewFaces = [];
 
-  for (const file of files) {
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
     const fd = new FormData();
     fd.append("image", file, "photo.jpg");
     fd.append("class_id", activeClassId);
@@ -136,7 +140,13 @@ analyzeBtn.addEventListener("click", async () => {
 
       if (data.error) { anyError = data.error; continue; }
 
-      (data.faces || []).forEach(face => {
+      const faces = data.faces || [];
+      // First photo drives the boxed preview (bbox coords match that image)
+      if (i === 0) {
+        previewFaces = faces;
+      }
+
+      faces.forEach(face => {
         if (face.recognized) {
           const existing = mergedByStudent.get(face.student_id);
           if (!existing || face.confidence > existing.confidence) {
@@ -165,16 +175,71 @@ analyzeBtn.addEventListener("click", async () => {
   recognizedTableWrap.style.display = "block";
 });
 
+function faceBoxStyle(face) {
+  if (!face.recognized) {
+    return { color: "#64748B", label: "Unknown" };
+  }
+  const review = reviewInfo(face);
+  if (face.already_marked) {
+    return { color: "#64748B", label: face.name || "Matched" };
+  }
+  if (review.needsReview) {
+    return { color: "#D97706", label: face.name || "Matched" };
+  }
+  return { color: "#0D9488", label: face.name || "Matched" };
+}
+
+function drawFaceBox(ctx, face) {
+  const bbox = face.bbox;
+  if (!bbox || bbox.length < 4) return;
+
+  const x1 = bbox[0];
+  const y1 = bbox[1];
+  const x2 = bbox[2];
+  const y2 = bbox[3];
+  const w = x2 - x1;
+  const h = y2 - y1;
+  if (w < 2 || h < 2) return;
+
+  const { color, label } = faceBoxStyle(face);
+  const lineW = Math.max(2, Math.min(4, Math.round(Math.min(w, h) * 0.02)));
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineW;
+  ctx.strokeRect(x1, y1, w, h);
+
+  ctx.font = "bold 14px sans-serif";
+  const padX = 6;
+  const padY = 4;
+  const textW = ctx.measureText(label).width;
+  const boxH = 22;
+  let labelY = y1 - boxH - 2;
+  if (labelY < 0) labelY = y1 + 2;
+
+  ctx.fillStyle = color;
+  ctx.fillRect(x1, labelY, textW + padX * 2, boxH);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, x1 + padX, labelY + boxH - padY - 2);
+}
+
 function drawPreview() {
   resultCanvas.width = previewImage.width;
   resultCanvas.height = previewImage.height;
   const ctx = resultCanvas.getContext("2d");
   ctx.drawImage(previewImage, 0, 0);
+
+  previewFaces.forEach((face) => drawFaceBox(ctx, face));
+
+  const boxed = previewFaces.filter((f) => f.bbox && f.bbox.length >= 4).length;
   ctx.fillStyle = "rgba(16,24,40,0.75)";
-  ctx.fillRect(10, 10, 340, 30);
+  ctx.fillRect(10, 10, 380, 30);
   ctx.fillStyle = "#fff";
   ctx.font = "14px sans-serif";
-  ctx.fillText("Preview (first photo) — results merged below", 18, 30);
+  ctx.fillText(
+    `Preview (first photo) — ${boxed} face box(es)`,
+    18,
+    30
+  );
 }
 
 /** Label strength for teachers (does not hide matches). */

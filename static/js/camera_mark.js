@@ -2,6 +2,7 @@
 const startMarkBtn = document.getElementById("startMarkBtn");
 const stopMarkBtn = document.getElementById("stopMarkBtn");
 const markVideo = document.getElementById("markVideo");
+const markOverlay = document.getElementById("markOverlay");
 const markStatus = document.getElementById("markStatus");
 const recognizedList = document.getElementById("recognizedList");
 const classSelect = document.getElementById("classSelect");
@@ -28,7 +29,81 @@ classSelect?.addEventListener("change", () => {
   loadSubjects(classSelect.value);
   recognizedIds.clear();
   recognizedList.innerHTML = "";
+  clearOverlay();
 });
+
+function clearOverlay() {
+  if (!markOverlay) return;
+  const ctx = markOverlay.getContext("2d");
+  ctx.clearRect(0, 0, markOverlay.width, markOverlay.height);
+}
+
+/** Map image-pixel bbox onto overlay for object-fit: cover video. */
+function mapBboxCover(bbox, srcW, srcH, destW, destH) {
+  const scale = Math.max(destW / srcW, destH / srcH);
+  const drawnW = srcW * scale;
+  const drawnH = srcH * scale;
+  const offX = (destW - drawnW) / 2;
+  const offY = (destH - drawnH) / 2;
+  return [
+    bbox[0] * scale + offX,
+    bbox[1] * scale + offY,
+    bbox[2] * scale + offX,
+    bbox[3] * scale + offY,
+  ];
+}
+
+function drawLiveBox(result) {
+  if (!markOverlay || !markVideo) return;
+
+  const destW = markVideo.clientWidth || markOverlay.clientWidth;
+  const destH = markVideo.clientHeight || markOverlay.clientHeight;
+  if (!destW || !destH) return;
+
+  if (markOverlay.width !== destW || markOverlay.height !== destH) {
+    markOverlay.width = destW;
+    markOverlay.height = destH;
+  }
+
+  const ctx = markOverlay.getContext("2d");
+  ctx.clearRect(0, 0, destW, destH);
+
+  const bbox = result && result.bbox;
+  if (!bbox || bbox.length < 4) return;
+
+  const srcW = result.image_width || markVideo.videoWidth || 640;
+  const srcH = result.image_height || markVideo.videoHeight || 480;
+  const [x1, y1, x2, y2] = mapBboxCover(bbox, srcW, srcH, destW, destH);
+  const w = x2 - x1;
+  const h = y2 - y1;
+  if (w < 2 || h < 2) return;
+
+  let color = "#94A3B8";
+  let label = result.label || "Unknown";
+  if (result.recognized) {
+    color = result.already_marked ? "#64748B" : "#0D9488";
+    label = result.name || label;
+  } else if (result.error === "no face detected") {
+    return;
+  } else {
+    label = "Unknown";
+  }
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(x1, y1, w, h);
+
+  ctx.font = "bold 14px sans-serif";
+  const padX = 6;
+  const boxH = 22;
+  const textW = ctx.measureText(label).width;
+  let labelY = y1 - boxH - 2;
+  if (labelY < 0) labelY = y1 + 2;
+  ctx.fillStyle = color;
+  ctx.fillRect(x1, labelY, textW + padX * 2, boxH);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, x1 + padX, labelY + boxH - 6);
+}
 
 startMarkBtn.addEventListener("click", async () => {
   if (!classSelect.value || !subjectSelect.value) {
@@ -44,6 +119,7 @@ startMarkBtn.addEventListener("click", async () => {
     markVideo.srcObject = markStream;
     await markVideo.play();
     markStatus.innerText = "Scanning...";
+    clearOverlay();
     markInterval = setInterval(captureAndRecognize, 1200);
   } catch (err) {
     alert("Camera error: " + err.message);
@@ -62,6 +138,7 @@ stopMarkBtn.addEventListener("click", () => {
   classSelect.disabled = false;
   subjectSelect.disabled = false;
   markStatus.innerText = "Stopped";
+  clearOverlay();
 });
 
 async function captureAndRecognize() {
@@ -78,6 +155,7 @@ async function captureAndRecognize() {
   try {
     const res = await fetch("/recognize_face", { method: "POST", body: fd });
     const j = await res.json();
+    drawLiveBox(j);
     if (j.recognized) {
       const note = j.already_marked ? "already marked today" : "attendance saved";
       // No raw confidence % — clearer teacher-facing status
@@ -92,6 +170,7 @@ async function captureAndRecognize() {
     } else {
       if (j.error) markStatus.innerText = `Not recognized: ${j.error}`;
       else markStatus.innerText = `Not recognized — ask student to face the camera`;
+      if (j.error === "no face detected") clearOverlay();
     }
   } catch (err) {
     console.error(err);

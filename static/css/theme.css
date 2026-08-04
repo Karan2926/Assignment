@@ -272,7 +272,7 @@ h1, h2, h3, h4, h5, .display {
   position: absolute;
   inset: 12px;
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
   animation: scan-pulse 2.4s ease-in-out infinite;
 }
 .scan-corners span {
@@ -551,6 +551,14 @@ label.label2 {
   min-height: 340px;
   object-fit: cover;
   background: transparent;
+}
+.scan-stage .scan-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 2;
 }
 .scan-stage-empty {
   position: absolute;
