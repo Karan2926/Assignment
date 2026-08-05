@@ -12,7 +12,6 @@ COPY . .
 RUN mkdir -p /data/dataset
 
 ENV FLASK_ENV=production \
-    DB_PATH=/data/attendance.db \
     DATASET_DIR=/data/dataset \
     PYTHONUNBUFFERED=1
 
