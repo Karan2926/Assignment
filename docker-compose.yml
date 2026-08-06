@@ -1,5 +1,24 @@
-# Minimal production stack. Set SECRET_KEY before starting.
+# Production stack: Flask app + PostgreSQL (data survives restarts)
+# Usage:
+#   cp .env.example .env   # set SECRET_KEY + POSTGRES_PASSWORD
+#   docker compose up -d --build
+
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: attendance
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: attendance
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U attendance -d attendance"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
   web:
     build: .
     ports:
@@ -9,13 +28,19 @@ services:
       SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
       ALLOW_PUBLIC_REGISTER: "0"
       KEEP_CAPTURE_IMAGES: "0"
-      DB_PATH: /data/attendance.db
+      DATABASE_URL: postgresql://attendance:${POSTGRES_PASSWORD}@db:5432/attendance
       DATASET_DIR: /data/dataset
-      SESSION_COOKIE_SECURE: "0"
-      GUNICORN_WORKERS: "2"
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-0}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-2}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
     volumes:
       - attendance_data:/data
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
+  pgdata:
   attendance_data:
