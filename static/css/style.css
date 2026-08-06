@@ -1,0 +1,40 @@
+/* Legacy layout helpers (kept for compatibility). Prefer theme.css. */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  color: #1e293b;
+}
+
+h5, h4, h3 {
+  font-weight: 600;
+}
+
+.card {
+  border: none;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.progress {
+  background-color: #e2e8f0;
+  border-radius: 1rem;
+}
+
+.progress-bar {
+  background: linear-gradient(90deg, #3b82f6, #2563eb);
+  font-weight: 600;
+  border-radius: 1rem;
+}
+
+#attendanceChart {
+  max-height: 320px;
+}
+
+.text-muted {
+  color: #64748b !important;
+}

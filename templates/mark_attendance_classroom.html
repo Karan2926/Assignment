@@ -1,0 +1,107 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Classroom Photo — Digital Attendance</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/add_student">Add Student</a>
+      <a class="nav-link" href="/mark_attendance">Mark Attendance</a>
+      <a class="nav-link primary" href="/mark_attendance_classroom">Classroom Photo</a>
+      <a class="nav-link" href="/attendance_record">Records</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page" style="max-width: 1000px;">
+    <div class="page-head">
+      <div>
+        <span class="eyebrow">Batch recognition</span>
+        <h1 style="margin:0; font-size:1.6rem;">Classroom Photo</h1>
+      </div>
+      <a href="/" class="btn2 btn2-outline">Back to Dashboard</a>
+    </div>
+
+    <div class="card2">
+      <span class="eyebrow">Session</span>
+      <div class="session-bar mt-2">
+        <div>
+          <label class="label2">Class</label>
+          <select id="classSelect" class="input2">
+            <option value="">Select class</option>
+            {% for c in classes %}
+            <option value="{{ c['id'] }}">{{ c['name'] }}{% if c['section'] %} — Sec {{ c['section'] }}{% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="label2">Subject</label>
+          <select id="subjectSelect" class="input2">
+            <option value="">Select subject</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 mb-3 flex-wrap mt-3">
+        <button id="useCameraBtn" class="btn2 btn2-outline" type="button">Use Camera</button>
+        <span style="align-self:center; color:var(--ink-soft); font-size:0.85rem;">or</span>
+      </div>
+
+      <label class="label2">Upload a photo of the class</label>
+      <input type="file" id="classroomPhoto" accept="image/*" multiple class="input2 mb-3">
+
+      <div id="cameraSection" style="display:none;" class="mb-3">
+        <div class="scan-frame" style="max-width:560px;">
+          <video id="classroomVideo" autoplay muted playsinline style="display:block; width:100%; height:auto;"></video>
+          <div class="scan-corners">
+            <span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button id="captureBtn" class="btn2 btn2-teal" type="button">Capture Photo</button>
+          <span id="captureCount" class="mono" style="align-self:center; font-size:0.8rem; color:var(--ink-soft);"></span>
+          <button id="closeCameraBtn" class="btn2 btn2-outline" type="button">Close Camera</button>
+        </div>
+      </div>
+
+      <div class="d-flex gap-2 flex-wrap">
+        <button id="analyzeBtn" class="btn2 btn2-primary">Analyze Photo</button>
+        <button id="clearBtn" class="btn2 btn2-outline" type="button">Clear Photos</button>
+      </div>
+      <div id="analyzeStatus" class="mono mt-3" style="font-size:0.8rem; color:var(--ink-soft);"></div>
+
+      <div class="text-center mt-4">
+        <canvas id="resultCanvas" style="max-width:100%; border-radius:var(--radius); border:1px solid var(--line);"></canvas>
+      </div>
+
+      <div id="summaryCard" class="mt-4" style="display:none;"></div>
+
+      <div id="recognizedTableWrap" class="mt-4" style="display:none;">
+        <span class="eyebrow">Review before saving</span>
+        <h5 style="margin:0 0 1rem;">Detected students</h5>
+        <div class="table-responsive">
+          <table class="table2">
+            <thead>
+              <tr><th></th><th>Name</th><th>Confidence</th><th>Status</th></tr>
+            </thead>
+            <tbody id="recognizedTableBody"></tbody>
+          </table>
+        </div>
+        <button id="confirmBtn" class="btn2 btn2-teal mt-2">Confirm &amp; Save Attendance</button>
+        <div id="confirmStatus" class="mono mt-2" style="font-size:0.8rem; color:var(--ink-soft);"></div>
+      </div>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', filename='js/camera_mark_classroom.js') }}"></script>
+</body>
+</html>
