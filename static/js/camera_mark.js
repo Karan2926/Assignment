@@ -79,8 +79,9 @@ async function captureAndRecognize() {
     const res = await fetch("/recognize_face", { method: "POST", body: fd });
     const j = await res.json();
     if (j.recognized) {
-      const note = j.already_marked ? "already marked" : "saved";
-      markStatus.innerText = `Recognized: ${j.name} (conf ${Math.round(j.confidence * 100)}%) — ${note}`;
+      const note = j.already_marked ? "already marked today" : "attendance saved";
+      // No raw confidence % — clearer teacher-facing status
+      markStatus.innerText = `Matched: ${j.name} — ${note}`;
       if (!recognizedIds.has(j.student_id)) {
         recognizedIds.add(j.student_id);
         const li = document.createElement("li");
@@ -90,7 +91,7 @@ async function captureAndRecognize() {
       }
     } else {
       if (j.error) markStatus.innerText = `Not recognized: ${j.error}`;
-      else markStatus.innerText = `Not recognized`;
+      else markStatus.innerText = `Not recognized — ask student to face the camera`;
     }
   } catch (err) {
     console.error(err);

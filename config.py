@@ -7,6 +7,29 @@ import sys
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
+def _load_dotenv(path: str | None = None) -> None:
+    """Load KEY=VALUE pairs from .env without overriding real environment vars."""
+    env_path = path or os.path.join(APP_DIR, ".env")
+    if not os.path.isfile(env_path):
+        return
+    try:
+        with open(env_path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+    except OSError:
+        pass
+
+
+_load_dotenv()
+
 # production | development
 FLASK_ENV = os.environ.get("FLASK_ENV", "development").strip().lower()
 IS_PRODUCTION = FLASK_ENV == "production"
@@ -28,7 +51,23 @@ ALLOW_PUBLIC_REGISTER = os.environ.get("ALLOW_PUBLIC_REGISTER", "0") == "1"
 # Optional shared invite code if public register is enabled
 REGISTER_INVITE_CODE = os.environ.get("REGISTER_INVITE_CODE", "").strip()
 
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+# ---------------------------------------------------------------------------
+# Database — PostgreSQL is permanent default (avoids SQLite/Postgres mix-ups)
+# Postgres.app on this project uses port 5433.
+# Escape hatch for emergencies only: USE_SQLITE=1
+# ---------------------------------------------------------------------------
+_DEFAULT_DATABASE_URL = (
+    "postgresql://attendance:attendance@127.0.0.1:5433/attendance"
+)
+USE_SQLITE = os.environ.get("USE_SQLITE", "0").strip() == "1"
+
+if USE_SQLITE:
+    DATABASE_URL = ""
+else:
+    DATABASE_URL = os.environ.get("DATABASE_URL", _DEFAULT_DATABASE_URL).strip()
+    if not DATABASE_URL:
+        DATABASE_URL = _DEFAULT_DATABASE_URL
+
 DB_PATH = os.environ.get("DB_PATH", os.path.join(APP_DIR, "attendance.db"))
 
 DATASET_DIR = os.environ.get("DATASET_DIR", os.path.join(APP_DIR, "dataset"))
