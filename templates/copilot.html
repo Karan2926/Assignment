@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Attendance Copilot</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <style>
+    .copilot-shell { max-width: 880px; margin: 0 auto; }
+    .copilot-log {
+      min-height: 360px;
+      max-height: 55vh;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      padding: 1rem;
+      background: rgba(255,255,255,0.55);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .bubble {
+      max-width: 92%;
+      padding: 0.85rem 1rem;
+      border-radius: 14px;
+      white-space: pre-wrap;
+      line-height: 1.45;
+      font-size: 0.95rem;
+    }
+    .bubble-user {
+      align-self: flex-end;
+      background: var(--indigo);
+      color: #fff;
+    }
+    .bubble-bot {
+      align-self: flex-start;
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--ink);
+    }
+    .bubble-meta {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--ink-soft);
+      margin-bottom: 0.35rem;
+    }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.85rem; }
+    .chip {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 999px;
+      padding: 0.35rem 0.75rem;
+      font-size: 0.82rem;
+      cursor: pointer;
+    }
+    .chip:hover { border-color: var(--indigo); color: var(--indigo-dark); }
+    .composer {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 1rem;
+    }
+    .composer input {
+      flex: 1;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 0.75rem 0.9rem;
+      font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <nav class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark"></span>
+      Digital Attendance
+    </a>
+    <div class="nav-links">
+      <a class="nav-link" href="/">Dashboard</a>
+      <a class="nav-link primary" href="/copilot">AI Copilot</a>
+      <a class="nav-link" href="/analytics">Analytics</a>
+      <a class="nav-link" href="/logout">Log Out</a>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="copilot-shell">
+      <span class="eyebrow">Rules-based AI assistant</span>
+      <h1 class="panel-title" style="margin-top:0.35rem;">Attendance Copilot</h1>
+      <p class="panel-copy">
+        Ask about absences, at-risk students, or today’s classroom session.
+        Uses your live database (no cloud LLM yet) — safe for college demos.
+      </p>
+
+      <div class="card2 mt-3">
+        <div id="copilotLog" class="copilot-log" aria-live="polite"></div>
+        <div class="chip-row" id="chipRow">
+          <button type="button" class="chip" data-q="Who is absent today?">Absent today</button>
+          <button type="button" class="chip" data-q="Who is present today?">Present today</button>
+          <button type="button" class="chip" data-q="Flag students with less than 75% attendance">Below 75%</button>
+          <button type="button" class="chip" data-q="Summarize today's classroom photo session">Classroom summary</button>
+          <button type="button" class="chip" data-q="help">Help</button>
+        </div>
+        <form class="composer" id="copilotForm">
+          <input id="copilotInput" type="text" placeholder='e.g. Who is absent today in CSE-A / DBMS?' autocomplete="off" />
+          <button class="btn2 btn2-teal" type="submit">Ask</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+<script>
+const logEl = document.getElementById("copilotLog");
+const form = document.getElementById("copilotForm");
+const input = document.getElementById("copilotInput");
+
+function addBubble(role, text, meta) {
+  const wrap = document.createElement("div");
+  wrap.className = "bubble " + (role === "user" ? "bubble-user" : "bubble-bot");
+  if (meta) {
+    const m = document.createElement("div");
+    m.className = "bubble-meta";
+    m.textContent = meta;
+    wrap.appendChild(m);
+  }
+  const body = document.createElement("div");
+  // Keep plain text; convert **bold** lightly
+  body.innerHTML = escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+  wrap.appendChild(body);
+  logEl.appendChild(wrap);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+async function ask(q) {
+  q = (q || "").trim();
+  if (!q) return;
+  addBubble("user", q);
+  input.value = "";
+  try {
+    const res = await fetch("/api/copilot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      addBubble("bot", data.error || "Request failed", "error");
+      return;
+    }
+    addBubble("bot", data.answer || "No answer", data.intent ? ("intent: " + data.intent) : "");
+  } catch (err) {
+    addBubble("bot", "Network error talking to copilot.", "error");
+  }
+}
+
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  ask(input.value);
+});
+
+document.getElementById("chipRow").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-q]");
+  if (!btn) return;
+  ask(btn.getAttribute("data-q"));
+});
+
+addBubble(
+  "bot",
+  "Hi — I can answer attendance questions from your database.\nTry: Who is absent today in <class> / <subject>?",
+  "copilot ready"
+);
+</script>
+</body>
+</html>

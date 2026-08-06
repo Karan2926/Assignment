@@ -1462,6 +1462,108 @@ def analytics():
     )
 
 
+@app.route("/copilot", methods=["GET"])
+@role_required("teacher", "admin")
+def copilot_page():
+    return render_template(
+        "copilot.html",
+        role=session.get("role"),
+        username=session.get("username"),
+    )
+
+
+@app.route("/api/copilot", methods=["POST"])
+@role_required("teacher", "admin")
+@_limit(config.RATELIMIT_DEFAULT)
+def api_copilot():
+    """Rules-based AI Attendance Copilot — answers from live DB (no LLM)."""
+    data = request.get_json(silent=True) or {}
+    query = (data.get("query") or data.get("message") or "").strip()
+    if len(query) > 500:
+        return jsonify({"error": "Query too long"}), 400
+    try:
+        import copilot as copilot_mod
+
+        result = copilot_mod.ask(session["user_id"], session.get("role"), query)
+        return jsonify(result), 200
+    except Exception:
+        app.logger.exception("copilot error")
+        return jsonify({"error": "Copilot failed", "ok": False, "answer": "Something went wrong."}), 500
+
+
+@app.route("/register_export", methods=["GET"])
+@role_required("teacher", "admin")
+def register_export_page():
+    """ITM-style monthly attendance register Excel for higher authority."""
+    import calendar
+
+    classes = db.list_classes_for_user(session["user_id"], session.get("role"))
+    now = datetime.datetime.now()
+    return render_template(
+        "register_export.html",
+        classes=classes,
+        current_month=now.month,
+        current_year=now.year,
+        month_names={i: calendar.month_name[i] for i in range(1, 13)},
+        username=session.get("username"),
+        role=session.get("role"),
+        error=None,
+    )
+
+
+@app.route("/download_register_xlsx", methods=["GET"])
+@role_required("teacher", "admin")
+def download_register_xlsx():
+    """Download monthly register .xlsx (paper-register layout)."""
+    import calendar
+
+    try:
+        class_id = int(request.args.get("class_id"))
+        subject_id = int(request.args.get("subject_id"))
+        year = int(request.args.get("year"))
+        month = int(request.args.get("month"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "class_id, subject_id, year, month required"}), 400
+
+    if month < 1 or month > 12:
+        return jsonify({"error": "invalid month"}), 400
+
+    if not db.teacher_can_access(
+        session["user_id"], session.get("role"), class_id, subject_id
+    ):
+        return jsonify({"error": "Not authorized for this class/subject"}), 403
+
+    session_label = (request.args.get("session") or "").strip()
+    faculty = (request.args.get("faculty") or "").strip()
+    branch = (request.args.get("branch") or "").strip()
+
+    try:
+        from register_export import build_register_workbook
+
+        data = build_register_workbook(
+            class_id=class_id,
+            subject_id=subject_id,
+            year=year,
+            month=month,
+            session_label=session_label,
+            faculty_name=faculty,
+            branch_label=branch,
+        )
+    except Exception:
+        app.logger.exception("register export failed")
+        return jsonify({"error": "Failed to build register Excel"}), 500
+
+    fname = f"attendance_register_{year}_{month:02d}_c{class_id}_s{subject_id}.xlsx"
+    mem = io.BytesIO(data)
+    mem.seek(0)
+    return send_file(
+        mem,
+        as_attachment=True,
+        download_name=fname,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
 @app.route("/check_face", methods=["POST"])
 @role_required("teacher", "admin")
 def check_face():
