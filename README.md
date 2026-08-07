@@ -2,10 +2,6 @@
 
 Smart face-recognition attendance for college, built on your Flask + InsightFace prototype.
 
-> **New startup product (Django + React)** lives in [`saas/`](./saas/).  
-> It is multi-organization (college, office, factory, …) and built from scratch.  
-> See [`saas/README.md`](./saas/README.md).
-
 ## What Phase 1 added
 
 - **Classes & subjects** — structured college data instead of free-text only
