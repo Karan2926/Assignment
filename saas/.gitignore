@@ -1,0 +1,10 @@
+# Smart Attendance SaaS — local ignores
+backend/db.sqlite3
+backend/**/__pycache__/
+backend/.venv/
+backend/venv/
+frontend/node_modules/
+frontend/dist/
+.env
+.DS_Store
+*.pyc

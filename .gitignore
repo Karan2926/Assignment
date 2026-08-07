@@ -18,3 +18,7 @@ backups/
 .DS_Store
 .idea/
 .vscode/
+saas/frontend/node_modules/
+saas/frontend/dist/
+saas/backend/db.sqlite3
+saas/backend/**/__pycache__/
