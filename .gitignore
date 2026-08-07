@@ -18,3 +18,7 @@ backups/
 .DS_Store
 .idea/
 .vscode/
+
+# local archives
+*.zip
+Smart_Attendance_System_Synopsis.pdf
